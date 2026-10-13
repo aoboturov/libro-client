@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -8,10 +8,12 @@ import {
 	forgetSecrets,
 	isLibroFmUrl,
 	isWithin,
+	readJsonObject,
 	redact,
 	registerSecret,
 	safePathSegment,
 	scrubString,
+	writeFileAtomic,
 	writePrivateFile,
 } from "../lib/Security";
 
@@ -176,6 +178,81 @@ describe("Security", () => {
 			fs.writeFileSync(file, "{}", { mode: 0o644 });
 			writePrivateFile(file, "{}");
 			expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+		});
+
+		test("replaces the file in one step and leaves no temp file", () => {
+			const file = path.join(tmpDir, "state.json");
+			writePrivateFile(file, '{"old": true}');
+			writePrivateFile(file, '{"new": true}');
+			expect(fs.readFileSync(file, "utf-8")).toBe('{"new": true}');
+			expect(fs.readdirSync(tmpDir)).toEqual(["state.json"]);
+		});
+
+		test("a write that fails leaves the old file and no temp file", () => {
+			const file = path.join(tmpDir, "state.json");
+			writePrivateFile(file, '{"old": true}');
+			const rename = fs.renameSync;
+			const spy = spyOn(fs, "renameSync").mockImplementation(() => {
+				throw Object.assign(new Error("ENOSPC: no space left"), { code: "ENOSPC" });
+			});
+			try {
+				expect(() => writePrivateFile(file, '{"new": true}')).toThrow("ENOSPC");
+			} finally {
+				spy.mockRestore();
+				fs.renameSync = rename;
+			}
+			expect(fs.readFileSync(file, "utf-8")).toBe('{"old": true}');
+			expect(fs.readdirSync(tmpDir)).toEqual(["state.json"]);
+		});
+	});
+
+	describe("writeFileAtomic", () => {
+		let tmpDir: string;
+
+		beforeEach(() => {
+			tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "libro-sec-test-"));
+		});
+
+		afterEach(() => {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		});
+
+		test("keeps the default permissions when no mode is given", () => {
+			const file = path.join(tmpDir, "metadata.json");
+			writeFileAtomic(file, "{}");
+			expect(fs.readFileSync(file, "utf-8")).toBe("{}");
+			expect(fs.statSync(file).mode & 0o700).toBe(0o600);
+			expect(fs.readdirSync(tmpDir)).toEqual(["metadata.json"]);
+		});
+	});
+
+	describe("readJsonObject", () => {
+		let tmpDir: string;
+
+		beforeEach(() => {
+			tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "libro-sec-test-"));
+		});
+
+		afterEach(() => {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		});
+
+		test("returns the object in a well-formed file", () => {
+			const file = path.join(tmpDir, "config.json");
+			fs.writeFileSync(file, '{"username": "me"}');
+			expect(readJsonObject(file)).toEqual({ username: "me" });
+		});
+
+		test("names the file in the error for truncated or non-object content", () => {
+			const file = path.join(tmpDir, "state.json");
+			fs.writeFileSync(file, '{"111": {"book": ');
+			expect(() => readJsonObject(file)).toThrow(file);
+			expect(() => readJsonObject(file)).toThrow("not valid JSON");
+
+			fs.writeFileSync(file, "[]");
+			expect(() => readJsonObject(file)).toThrow("must hold a JSON object");
+			fs.writeFileSync(file, "");
+			expect(() => readJsonObject(file)).toThrow("not valid JSON");
 		});
 	});
 });

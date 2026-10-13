@@ -30,7 +30,8 @@ src/
                       with yauzl one entry at a time, and moved into place with renames
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
     Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials)
-    Security.ts     — Secret redaction, libro.fm host check, path guards, 0600 file writes
+    Security.ts     — Secret redaction, libro.fm host check, path guards, atomic (temp + rename)
+                      and 0600 file writes, readJsonObject()
     History.ts      — Per-title listening history from library user_metadata (text/JSON/CSV)
     State.ts        — Local book state (data/config/state.json)
     Concurrency.ts  — mapWithLimit: Promise.all with a cap on calls running at once
