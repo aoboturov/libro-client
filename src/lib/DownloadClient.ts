@@ -1,7 +1,7 @@
 import path from "path";
 import fs from "fs";
 import { createHash } from "crypto";
-import { Readable } from "stream";
+import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
 import type { ReadableStream } from "stream/web";
 import yauzl from "yauzl";
@@ -22,6 +22,13 @@ const scope = "DownloadClient";
 export default class DownloadCLient {
 	/** Hidden folder in the download directory where books are unpacked. */
 	static readonly stagingDirName = ".libro-partial";
+
+	/**
+	 * Give up on a part when no data has arrived for this long. A connection
+	 * that silently stalls would otherwise hold the book (and, in the service,
+	 * every later check) forever.
+	 */
+	static stallTimeoutMs = 60_000;
 
 	/**
 	 * Downloads a list of files and returns the paths.
@@ -136,13 +143,33 @@ export default class DownloadCLient {
 		signal?: AbortSignal
 	): Promise<void> {
 		const tmp = tempPathFor(file);
+		// Abort when no bytes arrive for `stallTimeoutMs`. The timer runs from
+		// before the request, so a server that never answers is caught too.
+		const stall = new AbortController();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const rearm = () => {
+			clearTimeout(timer);
+			timer = setTimeout(
+				() =>
+					stall.abort(
+						new Error(
+							`Download stalled: no data for ${DownloadCLient.stallTimeoutMs / 1000}s`
+						)
+					),
+				DownloadCLient.stallTimeoutMs
+			);
+		};
+		const combined = signal
+			? AbortSignal.any([signal, stall.signal])
+			: stall.signal;
 		try {
 			// Only libro.fm itself gets the bearer token; part URLs on a CDN
 			// (or a lookalike such as evillibro.fm) are fetched without it.
 			const opts = isLibroFmUrl(url)
-				? { headers: APIHandler.getHeaders(authToken), signal }
-				: { signal };
+				? { headers: APIHandler.getHeaders(authToken), signal: combined }
+				: { signal: combined };
 
+			rearm();
 			const response = await fetch(url, opts);
 			// An error page (e.g. an expired signed URL) is not a zip.
 			if (!response.ok) {
@@ -156,14 +183,24 @@ export default class DownloadCLient {
 			// Rejects if the connection drops before the advertised length.
 			await pipeline(
 				Readable.fromWeb(response.body as ReadableStream),
+				new Transform({
+					transform(chunk, _encoding, callback) {
+						rearm();
+						callback(null, chunk);
+					},
+				}),
 				fs.createWriteStream(tmp),
-				{ signal }
+				{ signal: combined }
 			);
 			fs.renameSync(tmp, file);
 		} catch (error) {
 			fs.rmSync(tmp, { force: true });
-			logger.error({ error, fn: "DownloadClient.download" });
-			throw error;
+			// An abort surfaces as a bare AbortError; name the stall instead.
+			const cause = stall.signal.aborted ? stall.signal.reason : error;
+			logger.error({ error: cause, fn: "DownloadClient.download" });
+			throw cause;
+		} finally {
+			clearTimeout(timer);
 		}
 	}
 

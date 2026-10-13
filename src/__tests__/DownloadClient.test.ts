@@ -263,6 +263,39 @@ describe("DownloadClient", () => {
 			expect(fs.readdirSync(downloadDir)).toEqual([]);
 		});
 
+		test("a connection that stalls is given up, not waited on forever", async () => {
+			const stallTimeout = DownloadClient.stallTimeoutMs;
+			DownloadClient.stallTimeoutMs = 50;
+			// One chunk arrives, then nothing, and the stream never closes.
+			const stalled = new ReadableStream({
+				start(controller) {
+					controller.enqueue(new Uint8Array(1024));
+				},
+				pull() {
+					return new Promise(() => {});
+				},
+			});
+			serve({
+				"https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }),
+				"https://cdn.example/p2.zip": new Response(stalled),
+			});
+
+			try {
+				await expect(
+					DownloadClient.downloadFiles(
+						book,
+						["https://cdn.example/p1.zip", "https://cdn.example/p2.zip"],
+						"token",
+						false,
+						downloadDir
+					)
+				).rejects.toThrow("Download stalled");
+				expect(fs.readdirSync(downloadDir)).toEqual([]);
+			} finally {
+				DownloadClient.stallTimeoutMs = stallTimeout;
+			}
+		});
+
 		test("a part that fails to unpack leaves no partial book", async () => {
 			serve({
 				"https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }),

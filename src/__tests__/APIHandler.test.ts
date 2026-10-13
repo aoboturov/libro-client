@@ -113,6 +113,19 @@ describe("APIHandler", () => {
 				expect(result.access_token).toBe("abc123");
 			});
 
+			test("every request carries a timeout, so a silent server cannot hang a check", async () => {
+				const fetchMock = serve({
+					ok: true,
+					json: () => Promise.resolve({ access_token: "t", token_type: "bearer" }),
+				});
+
+				await APIHandler.fetchLoginData("user", "pass");
+
+				const { opts } = firstCall(fetchMock);
+				expect(opts.signal).toBeInstanceOf(AbortSignal);
+				expect(opts.signal?.aborted).toBe(false);
+			});
+
 			test("throws on non-ok response", async () => {
 				serve({ ok: false, statusText: "Unauthorized" });
 
