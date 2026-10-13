@@ -32,7 +32,7 @@ src/
                       with yauzl one entry at a time, and moved into place with renames
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
     Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials). Log files are
-                      kept across runs and rotated (3 × 10 MB per level)
+                      kept across runs and rotated (3 × 10 MB per level); exitAfterLogs()
     Security.ts     — Secret redaction, libro.fm host check, path guards, atomic (temp + rename)
                       and 0600 file writes, readJsonObject()
     History.ts      — Per-title listening history from library user_metadata (text/JSON/CSV)
@@ -137,4 +137,6 @@ start.
   with `isWithin` (download dir, cache dir, zip entries).
 - Nothing on disk outside `data/config` holds a download credential: `DownloadClient.storedMetadata`
   strips the signed part URLs from what `saveMetadata` and `State.addBook` keep.
+- The service and the CLI log only through `logger` (never `console.*`), so every line is
+  redacted. After a final log line, exit with `exitAfterLogs()` rather than `process.exit()`.
 - `.dockerignore` excludes `data/` — never bake `data/config` or `data/logs` into an image.
