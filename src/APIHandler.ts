@@ -39,6 +39,9 @@ export default class APIHandler {
 	// Also sent by the app's AuthInterceptor on every request.
 	static device = "libro-client";
 	static osVer = "Android 34";
+	// A request that never answers must not stall a check (or the whole
+	// service) forever. Downloads have their own stall detection.
+	static requestTimeoutMs = 30_000;
 
 	/** Fetch Login Data */
 	@LogMethod({
@@ -131,7 +134,10 @@ export default class APIHandler {
 		url: string,
 		opts: RequestInit
 	): Promise<T> {
-		const response = await fetch(url, opts);
+		const response = await fetch(url, {
+			...opts,
+			signal: AbortSignal.timeout(this.requestTimeoutMs),
+		});
 		if (!response.ok) throw await this.httpError(response);
 
 		const data: any = await response.json();
