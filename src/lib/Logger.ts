@@ -1,20 +1,19 @@
 import { format, transports, createLogger } from "winston";
 import path from "path";
-import fs from "fs";
 
 import { LOGS_DIR } from "./Directories";
 import { redact, registerSecret, scrubString } from "./Security";
-
-if (fs.existsSync(LOGS_DIR)) {
-	fs.readdirSync(LOGS_DIR).forEach((file) => {
-		fs.unlinkSync(path.join(LOGS_DIR, file));
-	});
-}
 
 const sillyLogFile = path.join(LOGS_DIR, "silly.log");
 const debugLogFile = path.join(LOGS_DIR, "debug.log");
 
 const DEBUG_MODE = process.env.DEBUG === "true";
+
+// Logs are kept across runs (a crash would otherwise take its own log with it
+// at the next start) and rotated instead: at most LOG_FILES files of
+// LOG_FILE_BYTES each per level, the newest always under the plain name.
+const LOG_FILE_BYTES = 10 * 1024 * 1024;
+const LOG_FILES = 3;
 
 type Info = Parameters<Parameters<typeof format.printf>[0]>[0];
 
@@ -61,6 +60,22 @@ export function getFormat(fileTransport: boolean = false) {
 	});
 }
 
+const fileTransport = (filename: string, level: string) =>
+	new transports.File({
+		format: format.combine(
+			format.errors({ stack: true }),
+			format.splat(),
+			format.timestamp(),
+			getFormat(true)
+		),
+		filename,
+		level,
+		maxsize: LOG_FILE_BYTES,
+		maxFiles: LOG_FILES,
+		tailable: true,
+		options: { flags: "a", mode: 0o600 },
+	});
+
 const logger = createLogger({
 	level: DEBUG_MODE ? "debug" : "info",
 
@@ -75,28 +90,8 @@ const logger = createLogger({
 				getFormat()
 			),
 		}),
-		new transports.File({
-			format: format.combine(
-				format.errors({ stack: true }),
-				format.splat(),
-				format.timestamp(),
-				getFormat(true)
-			),
-			filename: sillyLogFile,
-			options: { flags: "a", mode: 0o600 },
-			level: "silly",
-		}),
-		new transports.File({
-			format: format.combine(
-				format.errors({ stack: true }),
-				format.splat(),
-				format.timestamp(),
-				getFormat(true)
-			),
-			filename: debugLogFile,
-			options: { flags: "a", mode: 0o600 },
-			level: "debug",
-		}),
+		fileTransport(sillyLogFile, "silly"),
+		fileTransport(debugLogFile, "debug"),
 	],
 });
 

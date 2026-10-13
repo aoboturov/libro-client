@@ -31,7 +31,8 @@ src/
                       whole in memory) in <download dir>/.libro-partial, unzipped there
                       with yauzl one entry at a time, and moved into place with renames
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
-    Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials)
+    Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials). Log files are
+                      kept across runs and rotated (3 × 10 MB per level)
     Security.ts     — Secret redaction, libro.fm host check, path guards, atomic (temp + rename)
                       and 0600 file writes, readJsonObject()
     History.ts      — Per-title listening history from library user_metadata (text/JSON/CSV)
