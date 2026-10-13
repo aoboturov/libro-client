@@ -54,6 +54,8 @@ Replace `[...isbns]` with the ISBN of the audiobook you want to download. You ca
 
 If you don't specify an ISBN, the tool will prompt you to select an audiobook from your library.
 
+With several ISBNs, up to 4 books are downloaded at a time (`LIBROFM_PARALLEL_DOWNLOADS`). Books you already have are asked about first, one at a time, unless `--overwrite` is given. One failed download doesn't stop the others; the command exits with status 1 if any book could not be downloaded.
+
 A book only shows up in your download folder once it is complete. Its zip parts are streamed to a hidden `.libro-partial` folder inside the download folder, unpacked there, and then moved into place, so a failed or interrupted download never leaves a partial book behind. If the tool is killed mid-download, the next attempt at that book clears what was left; you can also delete `.libro-partial` yourself while nothing is downloading.
 
 Downloads go straight to disk and are never held in memory whole, so memory use stays at a few tens of MB however large the book is. While a book downloads, the download folder needs free space for about twice its size (the zip parts plus the unpacked files).
@@ -131,7 +133,7 @@ DEBUG=true                          # enable debug-level logging (default: off)
 LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
-LIBROFM_PARALLEL_DOWNLOADS=4        # background service: new books downloaded at the same time (default: 4)
+LIBROFM_PARALLEL_DOWNLOADS=4        # books downloaded at the same time, by the service and by `get` (default: 4)
 LIBROFM_DOWNLOAD_DIR=<path>         # where books go (default: ./downloads, or the folder chosen at the first interactive run)
 LIBROFM_DATA_DIR=<path>             # where settings, the session token and logs live (default: ./data)
 ```

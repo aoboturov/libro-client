@@ -112,7 +112,7 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 | `LIBROFM_USERNAME` | No | Libro.fm account email (fallback to interactive prompt) |
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
 | `LIBROFM_POLL_MINUTES` | No | Minutes between the background service's library checks (default 15; fractions allowed) |
-| `LIBROFM_PARALLEL_DOWNLOADS` | No | New books the background service downloads at the same time (default 4) |
+| `LIBROFM_PARALLEL_DOWNLOADS` | No | Books downloaded at the same time, by the service and by `get` with several ISBNs (default 4) |
 | `LIBROFM_DOWNLOAD_DIR` | No | Where books are saved (default `downloads/`, or the folder chosen at the first interactive run) |
 | `LIBROFM_DATA_DIR` | No | Where config, state, logs and cache live (default `data/`) |
 

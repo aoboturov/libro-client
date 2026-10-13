@@ -3,47 +3,49 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
-import LibroFmClient, { CredentialsError } from "@/LibroFmClient";
+import LibroFmClient from "@/LibroFmClient";
+import { mapWithLimit } from "@/lib/Concurrency";
+import { parallelDownloads } from "@/lib/Config";
 import InputHandler from "@/lib/InputHandler";
-import logger from "@/lib/Logger";
+import logger, { exitAfterLogs } from "@/lib/Logger";
 import { toCsv, toJson, toText } from "@/lib/History";
 import { writePrivateFile } from "@/lib/Security";
 
 const SCRIPT_NAME = "libro";
 
-const client = new LibroFmClient();
-try {
-	await client.init();
-} catch (error) {
-	if (!(error instanceof CredentialsError)) throw error;
-	logger.error(error.message);
-	process.exit(1);
-}
+// Created and logged in by the middleware below, once the command line has
+// been checked: `--help` and a mistyped command never prompt or go online.
+let client: LibroFmClient;
 
-const Command = yargs(hideBin(process.argv))
+const printBooks = (books: Audiobook[]) => {
+	for (const ab of books) {
+		logger.info(`Title: ${ab.title}`);
+		logger.info(`ISBN: ${ab.isbn}`);
+		logger.info(`Duration: ${ab.audiobook_info?.duration}`);
+		logger.info(`Narrators: ${ab.audiobook_info?.narrators?.join(", ")}`);
+		logger.info("");
+	}
+};
+
+const parser = yargs(hideBin(process.argv))
 	.scriptName(SCRIPT_NAME)
+	.strict()
+	.demandCommand(1, "Pick a command.")
+	// Errors are thrown to the catch below, not printed by yargs: it would
+	// carry on into the middleware (and a login) after a usage error.
+	.fail(false)
+	.middleware(async () => {
+		client = new LibroFmClient();
+		await client.init();
+	})
 	.command({
 		command: "list",
 		aliases: ["ls"],
 		describe: "Fetch list of books in library",
 		handler: async () => {
-			const audiobooks = await client.getLibrary();
-
-			logger.info(
-				`Found ${
-					Object.values(audiobooks).length
-				} audiobooks in library\n`
-			);
-			const booklist = Object.values(audiobooks);
-			booklist.forEach((ab, i) => {
-				logger.info(`Title: ${ab.title}`);
-				logger.info(`ISBN: ${ab.isbn}`);
-				logger.info(`Duration: ${ab.audiobook_info?.duration}`);
-				logger.info(
-					`Narrators: ${ab.audiobook_info?.narrators?.join(", ")}`
-				);
-				logger.info("");
-			});
+			const audiobooks = Object.values(await client.getLibrary());
+			logger.info(`Found ${audiobooks.length} audiobooks in library\n`);
+			printBooks(audiobooks);
 		},
 	})
 	.command(
@@ -74,62 +76,62 @@ const Command = yargs(hideBin(process.argv))
 					},
 				}),
 		async (argv) => {
-			const audiobookLibrary = await client.getLibrary();
-			let count = 0;
-			const downloadPromises: Promise<void>[] = [];
-
-			const downloadHelper = async (book: Audiobook) => {
-				logger.info(`Downloading: ${book.title}`);
-				const filepath = await client.downloadBook(
-					book,
-					argv.overwrite,
-					argv.keepZip
-				);
-				if (filepath) {
-					logger.info(`Downloaded ${book.title}`);
-					count++;
-				} else {
-					logger.info("No new books downloaded");
-				}
-			};
-
-			// If ISBNs are provided, download those books
-			// Otherwise, prompt the user to select a book
-			if (argv.isbns && argv.isbns.length > 0) {
-				for (const isbn of argv.isbns) {
-					logger.info(`Searching library for ISBN: ${isbn}`);
-					const book = audiobookLibrary[isbn];
-					if (book) {
-						downloadPromises.push(downloadHelper(book));
-					} else {
-						logger.error(`No book found with ISBN: ${isbn}`, {
-							fn: "Command.get",
-						});
-					}
-				}
-			} else {
-				const downloadChoice = await InputHandler.requestDownloadChoice(
-					Object.values(audiobookLibrary)
-				);
-				if (downloadChoice) {
-					const book = audiobookLibrary[downloadChoice];
-					if (book) {
-						downloadPromises.push(downloadHelper(book));
-					} else {
-						logger.error("Invalid selection", {
-							fn: "Command.get",
-						});
-					}
-				} else {
-					logger.error("Invalid selection", {
-						fn: "Command.get",
-					});
-				}
+			const library = await client.getLibrary();
+			const requested = (argv.isbns ?? []).map(String);
+			const missing = requested.filter((isbn) => !library[isbn]);
+			for (const isbn of missing) {
+				logger.error(`No book found with ISBN: ${isbn}`, { fn: "Command.get" });
 			}
 
-			await Promise.all(downloadPromises);
-			if (count === 0) throw new Error("No books selected");
-			logger.info(`Downloaded ${count} new books.`);
+			// With ISBNs, download those books; otherwise let the user pick one.
+			let books = requested
+				.filter((isbn) => library[isbn])
+				.map((isbn) => library[isbn]);
+			if (requested.length === 0) {
+				const choice = await InputHandler.requestDownloadChoice(
+					Object.values(library)
+				);
+				books = library[choice] ? [library[choice]] : [];
+			}
+
+			// Ask about books already downloaded here, one at a time: inside
+			// parallel downloads the prompts would interleave.
+			if (!argv.overwrite) {
+				const kept: Audiobook[] = [];
+				for (const book of books) {
+					if (
+						!client.state.hasBook(book.isbn) ||
+						(await InputHandler.requestOverwrite(book))
+					) {
+						kept.push(book);
+					} else {
+						logger.info(`Skipped ${book.title}`);
+					}
+				}
+				books = kept;
+			}
+
+			let downloaded = 0;
+			let failed = 0;
+			await mapWithLimit(books, parallelDownloads(), async (book) => {
+				logger.info(`Downloading: ${book.title}`);
+				try {
+					const filepath = await client.downloadBook(book, true, argv.keepZip);
+					downloaded++;
+					logger.info(`Downloaded ${book.title} to ${filepath}`);
+				} catch (error) {
+					failed++;
+					logger.error((error as Error).message, { fn: "Command.get" });
+				}
+			});
+
+			logger.info(`Downloaded ${downloaded} new books.`);
+			const problems = failed + missing.length;
+			if (problems > 0) {
+				throw new Error(
+					`${problems} of ${books.length + missing.length} books could not be downloaded.`
+				);
+			}
 		}
 	)
 	.command({
@@ -145,22 +147,13 @@ const Command = yargs(hideBin(process.argv))
 			}),
 		handler: async (argv) => {
 			const audiobooks = await client.getNewBooks();
-			if (!argv.json) {
-				logger.info(
-					`Found ${audiobooks.length} new audiobooks in library\n`
-				);
-				audiobooks.forEach((ab, i) => {
-					logger.info(`Title: ${ab.title}`);
-					logger.info(`ISBN: ${ab.isbn}`);
-					logger.info(`Duration: ${ab.audiobook_info?.duration}`);
-					logger.info(
-						`Narrators: ${ab.audiobook_info?.narrators?.join(", ")}`
-					);
-					logger.info("");
-				});
-			} else {
-				logger.info(JSON.stringify(audiobooks, null, 2));
+			if (argv.json) {
+				// Plain stdout (not the logger) so the JSON can be piped.
+				process.stdout.write(JSON.stringify(audiobooks, null, 2) + "\n");
+				return;
 			}
+			logger.info(`Found ${audiobooks.length} new audiobooks in library\n`);
+			printBooks(audiobooks);
 		},
 	})
 	.command(
@@ -207,8 +200,14 @@ const Command = yargs(hideBin(process.argv))
 				process.stdout.write(text);
 			}
 		}
-	)
-	.demandCommand()
-	.parse();
+	);
 
-export default Command;
+try {
+	await parser.parseAsync();
+} catch (error) {
+	// A command line that made no sense (yargs' own YError) or a command that
+	// failed: say why, with exit status 1, instead of a stack trace.
+	if ((error as Error)?.name === "YError") parser.showHelp();
+	logger.error((error as Error)?.message ?? String(error), { fn: "cli" });
+	exitAfterLogs(1);
+}
