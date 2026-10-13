@@ -141,7 +141,8 @@ Environment variables take precedence over the values saved in `data/config/conf
 - Your password is only sent to `https://libro.fm/oauth/token`. It is never written to disk: after
   the first login, only your username and the session token are kept in `data/config/config.json`,
   readable by your user only.
-- Logs in `data/logs/` redact passwords, tokens and signed download links.
+- Logs in `data/logs/` redact passwords, tokens and signed download links. They are kept across
+  runs and rotated (at most 3 files of 10 MB per level), so the log of a crash survives the restart.
 - The `metadata.json` saved next to each book, and `data/config/state.json`, keep the download
   manifest without its signed, expiring part URLs, so a shared download folder never holds a
   working download link.
