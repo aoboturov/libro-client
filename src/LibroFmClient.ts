@@ -132,28 +132,23 @@ export default class LibroFmClient {
 		}
 	}
 
-	/** Downloads a list of books. */
-	@LogMethod({ scope, message: "Downloading books..." })
+	/**
+	 * Downloads one book into the download directory and records it in the
+	 * state. Returns the book's folder, or "" when an already downloaded book
+	 * was left alone.
+	 */
+	@LogMethod({ scope, message: "Downloading book..." })
 	async downloadBook(
 		book: Audiobook,
 		overwrite: boolean = false,
 		keepZip: boolean = false
 	): Promise<string> {
-		if (!this.config.authToken) throw new Error("Not logged in");
-		const authToken = this.config.authToken;
+		const { authToken } = this.config;
+		if (!authToken) throw new Error("Not logged in");
 
-		// fetch download links
-		const metadata = await this.getDownloadMetadata(book.isbn);
-
-		logger.verbose(`Downloading book: ${metadata.isbn}`, {
-			fn: "LibroFmClient.downloadBook",
-		});
-		const urls = metadata.parts.map((p) => p.url);
-
-		// check if book is already downloaded
+		// Already downloaded? Ask before fetching a manifest that may go unused.
 		if (!overwrite && this.state.hasBook(book.isbn)) {
-			const shouldOverwrite = await InputHandler.requestOverwrite(book);
-			if (!shouldOverwrite) {
+			if (!(await InputHandler.requestOverwrite(book))) {
 				logger.verbose("Skipping download", {
 					fn: "LibroFmClient.downloadBook",
 				});
@@ -162,6 +157,11 @@ export default class LibroFmClient {
 		}
 
 		try {
+			const metadata = await this.getDownloadMetadata(book.isbn);
+			logger.verbose(`Downloading book: ${metadata.isbn}`, {
+				fn: "LibroFmClient.downloadBook",
+			});
+
 			if (!book.authors) throw new Error("No authors found");
 			const authors =
 				typeof book.authors === "string"
@@ -183,7 +183,7 @@ export default class LibroFmClient {
 
 			const [path, zipped_files] = await DownloadCLient.downloadFiles(
 				filename,
-				urls,
+				metadata.parts.map((p) => p.url),
 				authToken,
 				keepZip,
 				this.config.downloadDir
@@ -198,10 +198,13 @@ export default class LibroFmClient {
 				...(zipped_files && { zippedPaths: zipped_files }),
 			});
 
-			return filename;
+			return path;
 		} catch (error) {
 			logger.error({ error, fn: "LibroFmClient.downloadBook" });
-			throw new Error("Failed to download books");
+			throw new Error(
+				`Failed to download "${book.title}": ${(error as Error)?.message ?? error}`,
+				{ cause: error }
+			);
 		}
 	}
 

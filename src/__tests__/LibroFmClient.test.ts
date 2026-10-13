@@ -392,5 +392,50 @@ describe("LibroFmClient", () => {
 				expect(fetchLibrary).toHaveBeenCalledTimes(2);
 			});
 		});
+
+		describe("downloadBook", () => {
+			const book: Audiobook = {
+				isbn: "001",
+				title: "Book One",
+				authors: ["Some Author"],
+			};
+			function fakeState(downloaded: string[] = []) {
+				const added: StateData[] = [];
+				return {
+					added,
+					downloadedAudioBooks: {},
+					hasBook: (isbn: string) => downloaded.includes(isbn),
+					addBook(data: StateData) {
+						added.push(data);
+					},
+				} as unknown as State & { added: StateData[] };
+			}
+
+			test("an already downloaded book that is left alone fetches no manifest", async () => {
+				spyOn(InputHandler, "requestOverwrite").mockResolvedValue(false);
+				const metadata = spyOn(APIHandler, "fetchDownloadMetadata");
+				const client = new LibroFmClient(
+					fakeConfig({ authToken: "token" }),
+					fakeState(["001"])
+				);
+
+				expect(await client.downloadBook(book)).toBe("");
+				expect(metadata).not.toHaveBeenCalled();
+			});
+
+			test("a failure names the book and keeps the cause", async () => {
+				spyOn(APIHandler, "fetchDownloadMetadata").mockRejectedValue(
+					new ApiError(500, "Internal Server Error")
+				);
+				const client = new LibroFmClient(
+					fakeConfig({ authToken: "token" }),
+					fakeState()
+				);
+
+				const result = client.downloadBook(book);
+				await expect(result).rejects.toThrow('Failed to download "Book One"');
+				await expect(result).rejects.toThrow("HTTP 500");
+			});
+		});
 	});
 });
