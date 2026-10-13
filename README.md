@@ -104,6 +104,8 @@ Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env
 
 If Libro.fm rejects the username or password, or there are none, the service stops with exit status 78 instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. Fix the credentials and start it again. `LIBROFM_USERNAME` overrides a username saved in `data/config/config.json` by an earlier interactive login, and switching accounts discards the saved session token.
 
+The service stops on `SIGTERM` or `SIGINT` (`docker stop`, Ctrl-C). A download in progress is dropped: it never reaches the download folder half done, and the next start downloads the book again.
+
 ### Docker
 
 To run the service using Docker, use the following command:

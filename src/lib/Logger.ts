@@ -150,4 +150,21 @@ export function LogMethod(
 	};
 }
 
+/**
+ * Exit once every transport has written what it holds. A plain process.exit
+ * right after a log call can drop the very line that explains the exit.
+ */
+export function exitAfterLogs(code: number): void {
+	process.exitCode = code;
+	// Anything still logging after this point (an in-flight download) must
+	// not turn a clean exit into a crash.
+	logger.on("error", () => {});
+	const fallback = setTimeout(() => process.exit(code), 2_000);
+	logger.once("finish", () => {
+		clearTimeout(fallback);
+		process.exit(code);
+	});
+	logger.end();
+}
+
 export default logger;
