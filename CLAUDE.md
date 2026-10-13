@@ -23,7 +23,7 @@ src/
   LibroFmClient.ts  — Main client: login, getLibrary, downloadBook, getNewBooks, getHistory
   APIHandler.ts     — HTTP layer: login, library, download-manifest endpoints
   lib/
-    Config.ts       — Credentials config (env vars + JSON file in data/config/)
+    Config.ts       — Credentials config (JSON file in data/config/, overridden by env vars)
     Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/)
     DownloadClient.ts — File download + zip extraction: parts are streamed to disk (never
                       whole in memory) in <download dir>/.libro-partial, unzipped there
@@ -110,11 +110,14 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
 | `LIBROFM_POLL_MINUTES` | No | Minutes between the background service's library checks (default 15; fractions allowed) |
 | `LIBROFM_PARALLEL_DOWNLOADS` | No | New books the background service downloads at the same time (default 4) |
+| `LIBROFM_DOWNLOAD_DIR` | No | Where books are saved (default `downloads/`, or the folder chosen at the first interactive run) |
 
 Only the username, auth token and download directory are persisted to `data/config/config.json`
-(mode `0600`; `data/` is `0700`). The password is never written to disk — a fresh login takes it
-from `LIBROFM_PASSWORD` or an interactive prompt, and an old config that still holds one is
-rewritten without it on the next start.
+(mode `0600`; `data/` is `0700`). Environment variables override the saved values, and when
+`LIBROFM_USERNAME` names a different account than the saved one, the saved token is discarded.
+The password is never written to disk — a fresh login takes it from `LIBROFM_PASSWORD` or an
+interactive prompt, and an old config that still holds one is rewritten without it on the next
+start.
 
 ## Handling secrets
 

@@ -1,11 +1,9 @@
 import fs from "fs";
+import os from "os";
+import path from "path";
 import { CONFIG_PATH } from "./Directories";
 import { LogMethod } from "./Logger";
 import { readJsonObject, registerSecret, writePrivateFile } from "./Security";
-
-const USERNAME = process.env.LIBROFM_USERNAME;
-const PASSWORD = process.env.LIBROFM_PASSWORD;
-const DOWNLOAD_DIR = process.env.LIBROFM_DOWNLOAD_DIR;
 
 const scope = "Config";
 
@@ -15,8 +13,8 @@ const scope = "Config";
  * the password from LIBROFM_PASSWORD or an interactive prompt.
  */
 export function persistedConfig(config: Partial<Config>) {
-	const { password, ...persisted } = config;
-	return persisted;
+	const { username, authToken, downloadDir } = config;
+	return { username, authToken, downloadDir };
 }
 
 /** Minutes between library checks in the background service. */
@@ -65,6 +63,18 @@ export function parallelDownloads(
 	return count;
 }
 
+/**
+ * A directory as the user typed it (`~/Books`, `../books`) made absolute, so
+ * it means the same folder whatever the working directory is later.
+ */
+export function resolveDir(dir: string): string {
+	const expanded =
+		dir === "~" || dir.startsWith("~/")
+			? path.join(os.homedir(), dir.slice(1))
+			: dir;
+	return path.resolve(expanded);
+}
+
 /** Configuration for the app */
 export default class Config {
 	username: string | undefined;
@@ -72,34 +82,56 @@ export default class Config {
 	authToken: string | undefined;
 	downloadDir: string | undefined;
 
-	constructor(config?: Partial<Config>) {
-		this.load();
+	/** `configPath` and `env` default to data/config/config.json and process.env; tests pass their own. */
+	constructor(
+		config?: Partial<Config>,
+		private readonly configPath: string = CONFIG_PATH,
+		env: NodeJS.ProcessEnv = process.env
+	) {
+		this.load(env);
 		Object.assign(this, config);
+		this.registerSecrets();
 	}
 
 	/** Changes the config */
 	@LogMethod({ scope })
 	change(config: Partial<Config>): void {
 		Object.assign(this, config);
+		if (this.downloadDir) this.downloadDir = resolveDir(this.downloadDir);
 		this.registerSecrets();
 		this.save();
 	}
 
-	/** Loads the config from the file system */
+	/**
+	 * Loads the config: the saved file first, then the environment, which
+	 * takes precedence (LIBROFM_USERNAME, LIBROFM_PASSWORD, LIBROFM_DOWNLOAD_DIR).
+	 */
 	@LogMethod({ scope })
-	private load(): Config | null {
-		let config: Config | null = null;
-		if (fs.existsSync(CONFIG_PATH)) {
-			config = readJsonObject(CONFIG_PATH) as Partial<Config> as Config;
-			Object.assign(this, config);
-			// Older versions saved the password; rewrite the file without it.
-			if (config && "password" in config) this.save();
-		} else {
+	private load(env: NodeJS.ProcessEnv): void {
+		const saved: Partial<Config> = fs.existsSync(this.configPath)
+			? readJsonObject(this.configPath)
+			: {};
+		this.username = saved.username;
+		this.authToken = saved.authToken;
+		this.downloadDir = saved.downloadDir;
+
+		if (env.LIBROFM_USERNAME) this.username = env.LIBROFM_USERNAME;
+		if (env.LIBROFM_PASSWORD) this.password = env.LIBROFM_PASSWORD;
+		if (env.LIBROFM_DOWNLOAD_DIR) this.downloadDir = env.LIBROFM_DOWNLOAD_DIR;
+		if (this.downloadDir) this.downloadDir = resolveDir(this.downloadDir);
+
+		// The saved token belongs to the saved username. After a switch of
+		// accounts it must not be reused: it would open the old library.
+		if (saved.username && this.username && saved.username !== this.username) {
+			this.authToken = undefined;
+		}
+
+		// Write the file when it is missing, still holds a password (older
+		// versions saved it) or no longer matches what is in effect.
+		const current = JSON.stringify(persistedConfig(this));
+		if ("password" in saved || current !== JSON.stringify(persistedConfig(saved))) {
 			this.save();
 		}
-		this.loadEnv();
-		this.registerSecrets();
-		return config;
 	}
 
 	/** Keep credentials out of the logs wherever they appear. */
@@ -109,19 +141,11 @@ export default class Config {
 		registerSecret(this.authToken);
 	}
 
-	/** Load Environment variables */
-	@LogMethod({ scope })
-	private loadEnv(override = false): void {
-		if (override || !this.username) this.username = USERNAME;
-		if (override || !this.password) this.password = PASSWORD;
-		if (override || !this.downloadDir) this.downloadDir = DOWNLOAD_DIR;
-	}
-
 	/** Saves the config to the file system */
 	@LogMethod({ scope })
 	private save(): void {
 		writePrivateFile(
-			CONFIG_PATH,
+			this.configPath,
 			JSON.stringify(persistedConfig(this), null, 2)
 		);
 	}

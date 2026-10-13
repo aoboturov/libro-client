@@ -9,7 +9,7 @@ const EX_CONFIG = 78;
 const stopForCredentials = (error: CredentialsError): never => {
 	console.error(
 		`${error.message} Stopping the service: retrying with the same credentials won't help. ` +
-			"Fix LIBROFM_USERNAME / LIBROFM_PASSWORD (a username saved in data/config/config.json takes precedence) and start it again."
+			"Fix LIBROFM_USERNAME / LIBROFM_PASSWORD and start it again."
 	);
 	process.exit(EX_CONFIG);
 };
