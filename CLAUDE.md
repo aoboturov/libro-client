@@ -24,7 +24,9 @@ src/
   APIHandler.ts     — HTTP layer: login, library, download-manifest endpoints
   lib/
     Config.ts       — Credentials config (JSON file in data/config/, overridden by env vars)
-    Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/)
+    Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/). LIBROFM_DATA_DIR
+                      overrides data/; a compiled binary whose build dir is gone uses
+                      $XDG_DATA_HOME/libro
     DownloadClient.ts — File download + zip extraction: parts are streamed to disk (never
                       whole in memory) in <download dir>/.libro-partial, unzipped there
                       with yauzl one entry at a time, and moved into place with renames
@@ -111,6 +113,7 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 | `LIBROFM_POLL_MINUTES` | No | Minutes between the background service's library checks (default 15; fractions allowed) |
 | `LIBROFM_PARALLEL_DOWNLOADS` | No | New books the background service downloads at the same time (default 4) |
 | `LIBROFM_DOWNLOAD_DIR` | No | Where books are saved (default `downloads/`, or the folder chosen at the first interactive run) |
+| `LIBROFM_DATA_DIR` | No | Where config, state, logs and cache live (default `data/`) |
 
 Only the username, auth token and download directory are persisted to `data/config/config.json`
 (mode `0600`; `data/` is `0700`). Environment variables override the saved values, and when

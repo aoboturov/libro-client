@@ -24,6 +24,8 @@ Then either run `bin/libro` directly or add `bin/` to your `PATH`:
 ./bin/libro
 ```
 
+Settings, the session token and logs live in `data/`, and books in `downloads/`, both next to the project. The standalone binary remembers the directory it was built in and keeps using it while that directory exists; copied to another machine it falls back to `~/.local/share/libro` (or `$XDG_DATA_HOME/libro`). Set `LIBROFM_DATA_DIR` to keep the app data somewhere else, and `LIBROFM_DOWNLOAD_DIR` for the books.
+
 ### List audiobooks
 
 To list all audiobooks in your library, run the following command:
@@ -129,6 +131,7 @@ LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
 LIBROFM_PARALLEL_DOWNLOADS=4        # background service: new books downloaded at the same time (default: 4)
 LIBROFM_DOWNLOAD_DIR=<path>         # where books go (default: ./downloads, or the folder chosen at the first interactive run)
+LIBROFM_DATA_DIR=<path>             # where settings, the session token and logs live (default: ./data)
 ```
 
 Environment variables take precedence over the values saved in `data/config/config.json`.
