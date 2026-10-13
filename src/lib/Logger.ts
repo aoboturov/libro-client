@@ -16,41 +16,45 @@ const debugLogFile = path.join(LOGS_DIR, "debug.log");
 
 const DEBUG_MODE = process.env.DEBUG === "true";
 
+type Info = Parameters<Parameters<typeof format.printf>[0]>[0];
+
 export function getFormat(fileTransport: boolean = false) {
-	return format.printf(({ timestamp, level, message, fn, ...rest }) => {
+	return format.printf((info: Info): string => {
+		const {
+			timestamp,
+			level,
+			message: rawMessage,
+			fn,
+			...rawRest
+		} = info as Info & { timestamp?: string; fn?: string };
 		// Never write credentials: LogMethod logs every argument, including
 		// passwords, tokens and signed download URLs.
-		message = redact(message) as typeof message;
-		rest = redact(rest) as typeof rest;
+		const message = redact(rawMessage);
+		const rest = redact(rawRest) as Record<string, unknown>;
 
 		if (!DEBUG_MODE && !fileTransport && level.includes("info")) {
-			return message;
+			return typeof message === "string" ? message : JSON.stringify(message);
 		}
 
 		const timeStr = timestamp ? `${timestamp} - ` : "";
+		const fnStr = fn ? ` ${fn}` : "";
 
-		let msg = `${timeStr}(${level}) - Uncategorized Log Message | ${JSON.stringify(
-			message
-		)}\n${JSON.stringify(rest)}}`;
-
-		if (typeof message === "object") {
-			const fnStr = message.fn ? ` ${message.fn}` : "";
-			delete message.fn;
-			msg = `${timeStr}(${level})${fnStr}`;
-			for (const key in message) {
-				msg += `\n${key}: ${JSON.stringify(message[key], null, 2)}`;
+		let msg: string;
+		if (typeof message === "object" && message !== null) {
+			const { fn: messageFn, ...fields } = message as Record<string, unknown>;
+			msg = `${timeStr}(${level})${messageFn ? ` ${messageFn}` : ""}`;
+			for (const [key, value] of Object.entries(fields)) {
+				msg += `\n${key}: ${JSON.stringify(value, null, 2)}`;
 			}
 		} else if (message) {
-			const fnStr = fn ? ` ${fn}` : "";
 			msg = `${timeStr}(${level})${fnStr} | ${message}`;
 		} else {
 			// no message, try to render fn and rest
-			const fnStr = fn ? ` ${fn}` : "";
 			msg = `${timeStr}(${level})${fnStr}`;
 		}
 
-		for (const key in rest) {
-			msg += `\n${key}: ${JSON.stringify(rest[key], null, 2)}`;
+		for (const [key, value] of Object.entries(rest)) {
+			msg += `\n${key}: ${JSON.stringify(value, null, 2)}`;
 		}
 
 		return scrubString(msg);

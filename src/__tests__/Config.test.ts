@@ -23,20 +23,20 @@ describe("Config", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
+	type Fields = {
+		username: string | undefined;
+		password: string | undefined;
+		authToken: string | undefined;
+	};
+
 	// Replicate Config logic without module-level side effects
-	function createConfig(
-		initial?: Partial<{
-			username: string;
-			password: string;
-			authToken: string;
-		}>
-	) {
+	function createConfig(initial?: Partial<Fields>) {
 		const config = {
 			username: undefined as string | undefined,
 			password: undefined as string | undefined,
 			authToken: undefined as string | undefined,
 
-			change(update: Partial<typeof config>) {
+			change(update: Partial<Fields>) {
 				Object.assign(this, update);
 				this.save();
 			},
