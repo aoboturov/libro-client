@@ -10,6 +10,7 @@ import {
 
 import APIHandler, { ApiError } from "../APIHandler";
 import LibroFmClient, { CredentialsError } from "../LibroFmClient";
+import DownloadClient from "../lib/DownloadClient";
 import InputHandler from "../lib/InputHandler";
 import type Config from "../lib/Config";
 import type State from "../lib/State";
@@ -399,6 +400,20 @@ describe("LibroFmClient", () => {
 				title: "Book One",
 				authors: ["Some Author"],
 			};
+			const manifest: DownloadMetadata = {
+				isbn: "001",
+				parts: [
+					{
+						url: "https://cdn.example/p1.zip?Signature=s3cret&Key-Pair-Id=K1",
+						size_bytes: 10,
+					},
+				],
+				tracks: [],
+				expires_at: "2026-12-31",
+				version: 1,
+				size_bytes: 10,
+			};
+
 			function fakeState(downloaded: string[] = []) {
 				const added: StateData[] = [];
 				return {
@@ -421,6 +436,34 @@ describe("LibroFmClient", () => {
 
 				expect(await client.downloadBook(book)).toBe("");
 				expect(metadata).not.toHaveBeenCalled();
+			});
+
+			test("what is kept on disk has no signed part URLs", async () => {
+				spyOn(APIHandler, "fetchDownloadMetadata").mockResolvedValue(manifest);
+				const downloadFiles = spyOn(
+					DownloadClient,
+					"downloadFiles"
+				).mockResolvedValue(["/books/Some Author/Book One", false]);
+				const saveMetadata = spyOn(
+					DownloadClient,
+					"saveMetadata"
+				).mockResolvedValue();
+				const state = fakeState();
+				const client = new LibroFmClient(
+					fakeConfig({ authToken: "token", downloadDir: "/books" }),
+					state
+				);
+
+				const result = await client.downloadBook(book);
+
+				expect(result).toBe("/books/Some Author/Book One");
+				// The download itself does get the signed URL...
+				expect(downloadFiles.mock.calls[0]?.[1]).toEqual([manifest.parts[0].url]);
+				// ...but neither metadata.json nor the state keeps it.
+				const saved = JSON.stringify([saveMetadata.mock.calls[0]?.[1], state.added]);
+				expect(saved).not.toContain("Signature");
+				expect(saved).not.toContain("cdn.example");
+				expect(state.added[0]?.meta.parts).toEqual([{ size_bytes: 10 }]);
 			});
 
 			test("a failure names the book and keeps the cause", async () => {

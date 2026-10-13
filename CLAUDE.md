@@ -53,7 +53,9 @@ src/
    without data
 3. CLI commands call `client.getLibrary()` -> `APIHandler.fetchLibrary()` -> paginated API
 4. `client.downloadBook()` -> `APIHandler.fetchDownloadMetadata()` -> `DownloadClient.downloadFiles()`
-5. `State` tracks downloaded books in `data/config/state.json` (mode `0600`) as a map of ISBN → `StateData`
+5. `State` tracks downloaded books in `data/config/state.json` (mode `0600`) as a map of ISBN →
+   `StateData`. Its `meta`, like the `metadata.json` saved next to each book, is a
+   `StoredDownloadMetadata`: the manifest without its signed part URLs
 
 ### External Dependencies
 
@@ -126,4 +128,6 @@ rewritten without it on the next start.
   CDN part URLs are fetched without it.
 - Folder names built from API metadata go through `safePathSegment`, and writes are checked
   with `isWithin` (download dir, cache dir, zip entries).
+- Nothing on disk outside `data/config` holds a download credential: `DownloadClient.storedMetadata`
+  strips the signed part URLs from what `saveMetadata` and `State.addBook` keep.
 - `.dockerignore` excludes `data/` — never bake `data/config` or `data/logs` into an image.
