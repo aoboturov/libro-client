@@ -100,7 +100,7 @@ To run the service, you can use Docker or another process manager.
 
 Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env`). When Libro.fm rejects the saved session token (it expired or was revoked), the service logs in again with these and retries at once. If Libro.fm is unreachable, rate-limits, or answers with a server error, the token is kept and the service tries again at the next check, also at startup. A request that gets no answer within 30 seconds, or a download that receives no data for 60 seconds, is given up and retried at the next check rather than holding the service forever.
 
-If Libro.fm rejects the username or password, or there are none, the service stops with exit status 78 instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. Fix the credentials and start it again. A username saved in `data/config/config.json` by an earlier interactive login takes precedence over `LIBROFM_USERNAME`.
+If Libro.fm rejects the username or password, or there are none, the service stops with exit status 78 instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. Fix the credentials and start it again. `LIBROFM_USERNAME` overrides a username saved in `data/config/config.json` by an earlier interactive login, and switching accounts discards the saved session token.
 
 ### Docker
 
@@ -128,7 +128,10 @@ LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
 LIBROFM_PARALLEL_DOWNLOADS=4        # background service: new books downloaded at the same time (default: 4)
+LIBROFM_DOWNLOAD_DIR=<path>         # where books go (default: ./downloads, or the folder chosen at the first interactive run)
 ```
+
+Environment variables take precedence over the values saved in `data/config/config.json`.
 
 ### Where your credentials go
 
