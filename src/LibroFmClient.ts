@@ -80,7 +80,7 @@ export default class LibroFmClient {
 	}
 
 	/**
-	 * Log in again when the authToken is gone (a failed request clears it).
+	 * Log in again when the authToken is gone (a rejected token clears it).
 	 * Never prompts: the background service has no terminal. Throws a
 	 * CredentialsError when retrying can't help.
 	 */
@@ -96,37 +96,40 @@ export default class LibroFmClient {
 		await this.login(username, password);
 	}
 
-	/** Fetches the library of audiobooks. */
+	/**
+	 * Fetches the whole library. When Libro.fm turns the session token down
+	 * (expired or revoked), logs in again with the configured credentials and
+	 * retries once. Any other failure is thrown: a partial library must never
+	 * pass for the whole one.
+	 */
 	@LogMethod({ scope, message: "Fetching library..." })
 	async getLibrary(): Promise<AudiobookMap> {
-		if (!this.config.authToken) throw new Error("Not logged in");
-		let audiobooks: AudiobookMap = {};
-		let page = 1;
-		while (true) {
-			try {
-				const data = await APIHandler.fetchLibrary(
-					this.config.authToken,
-					page
-				);
-
-				for (const book of data.audiobooks) {
-					audiobooks[book.isbn] = book;
-				}
-
-				if (page >= data.total_pages) {
-					break;
-				}
-				page += 1;
-			} catch (error: any) {
-				logger.error(`Failed to fetch library: ${error.message}`, {
-					fn: "LibroFmClient.getLibrary",
-				});
-				this.config.change({ authToken: undefined });
-				break;
-			}
+		try {
+			return await this.fetchLibraryPages();
+		} catch (error) {
+			if (!APIHandler.isAuthFailure(error)) throw error;
+			logger.warn(
+				`Libro.fm rejected the session token (${(error as Error).message}); logging in again`,
+				{ fn: "LibroFmClient.getLibrary" }
+			);
+			this.config.change({ authToken: undefined });
+			await this.ensureLoggedIn();
+			return this.fetchLibraryPages();
 		}
+	}
 
-		return audiobooks;
+	/** Every page of the library, keyed by ISBN. */
+	private async fetchLibraryPages(): Promise<AudiobookMap> {
+		const { authToken } = this.config;
+		if (!authToken) throw new Error("Not logged in");
+		const audiobooks: AudiobookMap = {};
+		for (let page = 1; ; page++) {
+			const data = await APIHandler.fetchLibrary(authToken, page);
+			for (const book of data.audiobooks) {
+				audiobooks[book.isbn] = book;
+			}
+			if (page >= data.total_pages) return audiobooks;
+		}
 	}
 
 	/** Downloads a list of books. */

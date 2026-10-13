@@ -42,11 +42,13 @@ src/
 
 1. `Config` loads credentials from env (`LIBROFM_USERNAME`, `LIBROFM_PASSWORD`) or `data/config/config.json`
 2. `LibroFmClient.init()` logs in via `APIHandler` if no authToken, saves token to config.
-   A failed library fetch clears the token; the service calls `ensureLoggedIn()` before each
-   check to log in again from the configured credentials (never prompts). Missing or rejected
-   credentials throw `CredentialsError` (see `APIHandler.isRejectedLogin`): the service exits
-   with status 78 and the CLI prints the message. Network errors, 429/5xx and the ELB gate's
-   empty 401 are thrown as is and retried at the next check. Every API request times out after
+   `getLibrary()` fetches every page or throws; it never returns a partial library. When the
+   API answers 401/403 (`APIHandler.isAuthFailure`) the token is cleared, `ensureLoggedIn()`
+   logs in again from the configured credentials (never prompts) and the fetch is retried
+   once. Missing or rejected credentials throw `CredentialsError` (see
+   `APIHandler.isRejectedLogin`): the service exits with status 78 and the CLI prints the
+   message. Network errors, 429/5xx and the ELB gate's empty 401 are thrown as is, the token
+   is kept, and the service retries at the next check. Every API request times out after
    `APIHandler.requestTimeoutMs`; a download part is aborted after `DownloadClient.stallTimeoutMs`
    without data
 3. CLI commands call `client.getLibrary()` -> `APIHandler.fetchLibrary()` -> paginated API

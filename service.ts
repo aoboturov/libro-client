@@ -85,7 +85,7 @@ const runService = async () => {
 	isRunning = true;
 
 	try {
-		// A failed request clears the token; log in again instead of failing
+		// A rejected token is cleared; log in again instead of failing
 		// every check until the service is restarted.
 		await client.ensureLoggedIn();
 		const newBooks = await scanLibrary();

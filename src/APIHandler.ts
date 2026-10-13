@@ -121,6 +121,18 @@ export default class APIHandler {
 	}
 
 	/**
+	 * True when the API turned the session token down (401 or 403): logging
+	 * in again is the only thing that can help. Not a network error, 429 or
+	 * 5xx — the same token should simply be retried later.
+	 */
+	static isAuthFailure(error: unknown): boolean {
+		return (
+			error instanceof ApiError &&
+			(error.status === 401 || error.status === 403)
+		);
+	}
+
+	/**
 	 * The app's DTOs type isbn as a long and the API has sent both strings and
 	 * numbers; keep it a string so it works as an AudiobookMap/State key.
 	 */
