@@ -1,7 +1,7 @@
 import fs from "fs";
 import { CONFIG_PATH } from "./Directories";
 import { LogMethod } from "./Logger";
-import { registerSecret, writePrivateFile } from "./Security";
+import { readJsonObject, registerSecret, writePrivateFile } from "./Security";
 
 const USERNAME = process.env.LIBROFM_USERNAME;
 const PASSWORD = process.env.LIBROFM_PASSWORD;
@@ -90,8 +90,7 @@ export default class Config {
 	private load(): Config | null {
 		let config: Config | null = null;
 		if (fs.existsSync(CONFIG_PATH)) {
-			const data = fs.readFileSync(CONFIG_PATH, "utf-8");
-			config = JSON.parse(data);
+			config = readJsonObject(CONFIG_PATH) as Partial<Config> as Config;
 			Object.assign(this, config);
 			// Older versions saved the password; rewrite the file without it.
 			if (config && "password" in config) this.save();

@@ -1,6 +1,6 @@
 import path from "path";
 import fs from "fs";
-import { createHash, randomBytes } from "crypto";
+import { createHash } from "crypto";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
 import type { ReadableStream } from "stream/web";
@@ -9,7 +9,12 @@ import yauzl from "yauzl";
 import APIHandler from "../APIHandler";
 import logger, { LogMethod } from "./Logger";
 import { CACHE_DIR, DOWNLOAD_DIR } from "./Directories";
-import { isLibroFmUrl, isWithin } from "./Security";
+import {
+	isLibroFmUrl,
+	isWithin,
+	tempPathFor,
+	writeFileAtomic,
+} from "./Security";
 
 const scope = "DownloadClient";
 
@@ -113,7 +118,7 @@ export default class DownloadCLient {
 		filepath: string
 	): Promise<void> {
 		const metadataPath = path.join(filepath, "metadata.json");
-		DownloadCLient.writeFileAtomic(
+		writeFileAtomic(
 			metadataPath,
 			JSON.stringify({ book, fileData }, null, 2)
 		);
@@ -130,7 +135,7 @@ export default class DownloadCLient {
 		file: string,
 		signal?: AbortSignal
 	): Promise<void> {
-		const tmp = DownloadCLient.tempPathFor(file);
+		const tmp = tempPathFor(file);
 		try {
 			// Only libro.fm itself gets the bearer token; part URLs on a CDN
 			// (or a lookalike such as evillibro.fm) are fetched without it.
@@ -222,27 +227,6 @@ export default class DownloadCLient {
 			} else {
 				fs.renameSync(from, to);
 			}
-		}
-	}
-
-	/** Hidden temp file next to `file`, for writing it and renaming it over. */
-	private static tempPathFor(file: string): string {
-		const suffix = randomBytes(6).toString("hex");
-		return path.join(
-			path.dirname(file),
-			`.${path.basename(file)}.${suffix}.tmp`
-		);
-	}
-
-	/** Write `data` to a temp file next to `file`, then rename it over `file`. */
-	private static writeFileAtomic(file: string, data: string | Uint8Array) {
-		const tmp = DownloadCLient.tempPathFor(file);
-		try {
-			fs.writeFileSync(tmp, data);
-			fs.renameSync(tmp, file);
-		} catch (error) {
-			fs.rmSync(tmp, { force: true });
-			throw error;
 		}
 	}
 

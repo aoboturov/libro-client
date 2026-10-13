@@ -249,6 +249,12 @@ describe("State", () => {
 			expect(state.hasBook("downloadedAudioBooks")).toBe(false);
 		});
 
+		test("a corrupt file is reported by name instead of a JSON.parse stack", () => {
+			fs.writeFileSync(statePath, '{"111": {"book": ');
+			expect(() => new State(undefined, statePath)).toThrow(statePath);
+			expect(() => new State(undefined, statePath)).toThrow("not valid JSON");
+		});
+
 		test("keeps books in an affected file and saves it clean", () => {
 			const book = makeStateData("111");
 			fs.writeFileSync(
