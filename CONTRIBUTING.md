@@ -19,7 +19,7 @@ bun run build:cli        # build the standalone binary -> bin/libro
 bun run build:docker     # build the Docker image
 ```
 
-CI runs `bun test` only — type-checking and the builds above are local checks, so run them yourself before pushing.
+CI runs `bunx tsc --noEmit` and `bun test` — the builds above are local checks, so run them yourself before pushing.
 
 ## Documentation
 

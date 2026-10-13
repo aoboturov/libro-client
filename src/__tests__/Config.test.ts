@@ -3,11 +3,12 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import {
+import Config, {
 	DEFAULT_PARALLEL_DOWNLOADS,
 	DEFAULT_POLL_MINUTES,
 	parallelDownloads,
 	pollIntervalMs,
+	resolveDir,
 } from "../lib/Config";
 
 describe("Config", () => {
@@ -23,20 +24,20 @@ describe("Config", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
+	type Fields = {
+		username: string | undefined;
+		password: string | undefined;
+		authToken: string | undefined;
+	};
+
 	// Replicate Config logic without module-level side effects
-	function createConfig(
-		initial?: Partial<{
-			username: string;
-			password: string;
-			authToken: string;
-		}>
-	) {
+	function createConfig(initial?: Partial<Fields>) {
 		const config = {
 			username: undefined as string | undefined,
 			password: undefined as string | undefined,
 			authToken: undefined as string | undefined,
 
-			change(update: Partial<typeof config>) {
+			change(update: Partial<Fields>) {
 				Object.assign(this, update);
 				this.save();
 			},
@@ -153,6 +154,105 @@ describe("Config", () => {
 			});
 			expect(config.username).toBe("init-user");
 			expect(config.password).toBe("init-pass");
+		});
+	});
+
+	describe("config file and environment", () => {
+		// The real class, on a temp file and an explicit environment.
+		const readFile = () => JSON.parse(fs.readFileSync(configPath, "utf-8"));
+
+		test("first run writes a file without a password, private to the user", () => {
+			const config = new Config(undefined, configPath, {
+				LIBROFM_USERNAME: "env@example.com",
+				LIBROFM_PASSWORD: "env-pass",
+			});
+			expect(config.username).toBe("env@example.com");
+			expect(config.password).toBe("env-pass");
+			expect(readFile()).toEqual({ username: "env@example.com" });
+			expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+		});
+
+		test("the environment takes precedence over the saved username", () => {
+			fs.writeFileSync(
+				configPath,
+				JSON.stringify({ username: "saved@example.com", authToken: "tok" })
+			);
+			const config = new Config(undefined, configPath, {
+				LIBROFM_USERNAME: "env@example.com",
+			});
+			expect(config.username).toBe("env@example.com");
+			expect(readFile().username).toBe("env@example.com");
+		});
+
+		test("a token saved for another account is not reused", () => {
+			fs.writeFileSync(
+				configPath,
+				JSON.stringify({ username: "old@example.com", authToken: "old-tok" })
+			);
+			const config = new Config(undefined, configPath, {
+				LIBROFM_USERNAME: "new@example.com",
+			});
+			expect(config.authToken).toBeUndefined();
+			expect(readFile()).toEqual({ username: "new@example.com" });
+		});
+
+		test("the saved token is kept for the same account, from the file or the env", () => {
+			fs.writeFileSync(
+				configPath,
+				JSON.stringify({ username: "me@example.com", authToken: "tok" })
+			);
+			expect(new Config(undefined, configPath, {}).authToken).toBe("tok");
+			expect(
+				new Config(undefined, configPath, { LIBROFM_USERNAME: "me@example.com" })
+					.authToken
+			).toBe("tok");
+		});
+
+		test("a password saved by an older version is dropped from the file", () => {
+			fs.writeFileSync(
+				configPath,
+				JSON.stringify({ username: "me@example.com", password: "old-pass", authToken: "tok" })
+			);
+			const config = new Config(undefined, configPath, {});
+			expect(config.password).toBeUndefined();
+			expect(readFile()).toEqual({ username: "me@example.com", authToken: "tok" });
+		});
+
+		test("the download directory is made absolute, from the env or a prompt", () => {
+			const config = new Config(undefined, configPath, {
+				LIBROFM_DOWNLOAD_DIR: "~/Audiobooks",
+			});
+			expect(config.downloadDir).toBe(path.join(os.homedir(), "Audiobooks"));
+
+			config.change({ downloadDir: "books" });
+			expect(config.downloadDir).toBe(path.resolve("books"));
+			expect(readFile().downloadDir).toBe(path.resolve("books"));
+		});
+
+		test("a corrupt file is reported by name", () => {
+			fs.writeFileSync(configPath, '{"username": ');
+			expect(() => new Config(undefined, configPath, {})).toThrow(configPath);
+		});
+
+		test("an unchanged file is not rewritten", () => {
+			fs.writeFileSync(
+				configPath,
+				JSON.stringify({ username: "me@example.com", authToken: "tok" })
+			);
+			const before = fs.statSync(configPath).mtimeMs;
+			const written = fs.readFileSync(configPath, "utf-8");
+			new Config(undefined, configPath, {});
+			expect(fs.readFileSync(configPath, "utf-8")).toBe(written);
+			expect(fs.statSync(configPath).mtimeMs).toBe(before);
+		});
+	});
+
+	describe("resolveDir", () => {
+		test("expands ~ and makes relative paths absolute", () => {
+			expect(resolveDir("~")).toBe(os.homedir());
+			expect(resolveDir("~/Books")).toBe(path.join(os.homedir(), "Books"));
+			expect(resolveDir("books")).toBe(path.resolve("books"));
+			expect(resolveDir("/abs/books")).toBe("/abs/books");
 		});
 	});
 

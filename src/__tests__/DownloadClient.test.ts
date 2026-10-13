@@ -263,6 +263,39 @@ describe("DownloadClient", () => {
 			expect(fs.readdirSync(downloadDir)).toEqual([]);
 		});
 
+		test("a connection that stalls is given up, not waited on forever", async () => {
+			const stallTimeout = DownloadClient.stallTimeoutMs;
+			DownloadClient.stallTimeoutMs = 50;
+			// One chunk arrives, then nothing, and the stream never closes.
+			const stalled = new ReadableStream({
+				start(controller) {
+					controller.enqueue(new Uint8Array(1024));
+				},
+				pull() {
+					return new Promise(() => {});
+				},
+			});
+			serve({
+				"https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }),
+				"https://cdn.example/p2.zip": new Response(stalled),
+			});
+
+			try {
+				await expect(
+					DownloadClient.downloadFiles(
+						book,
+						["https://cdn.example/p1.zip", "https://cdn.example/p2.zip"],
+						"token",
+						false,
+						downloadDir
+					)
+				).rejects.toThrow("Download stalled");
+				expect(fs.readdirSync(downloadDir)).toEqual([]);
+			} finally {
+				DownloadClient.stallTimeoutMs = stallTimeout;
+			}
+		});
+
 		test("a part that fails to unpack leaves no partial book", async () => {
 			serve({
 				"https://cdn.example/p1.zip": await zipOf({ "01.mp3": "one" }),
@@ -420,6 +453,50 @@ describe("DownloadClient", () => {
 			expect(saved.book.title).toBe("Book");
 			expect(saved.fileData.parts).toHaveLength(1);
 			expect(saved.fileData.tracks[0].chapter_title).toBe("Chapter 1");
+		});
+
+		test("metadata.json never holds the signed part URLs", async () => {
+			const bookDir = path.join(downloadDir, "Book");
+			fs.mkdirSync(bookDir);
+			const fileData: DownloadMetadata = {
+				isbn: "1",
+				parts: [
+					{
+						url: "https://cdn.example.com/p1.zip?Signature=s3cret&Key-Pair-Id=K1",
+						size_bytes: 1000,
+					},
+				],
+				tracks: [],
+				expires_at: "2025-01-01",
+				version: "1",
+				size_bytes: 1000,
+			};
+
+			await DownloadClient.saveMetadata({ isbn: "1", title: "Book" }, fileData, bookDir);
+
+			const text = fs.readFileSync(path.join(bookDir, "metadata.json"), "utf-8");
+			expect(text).not.toContain("Signature");
+			expect(text).not.toContain("cdn.example.com");
+			expect(JSON.parse(text).fileData.parts).toEqual([{ size_bytes: 1000 }]);
+		});
+
+		test("storedMetadata keeps everything but the part URLs", () => {
+			const stored = DownloadClient.storedMetadata({
+				isbn: "1",
+				parts: [{ url: "https://cdn.example.com/p1.zip?Signature=x", size_bytes: 5 }],
+				tracks: [],
+				expires_at: "2025-01-01",
+				version: 2,
+				size_bytes: 5,
+			});
+			expect(stored).toEqual({
+				isbn: "1",
+				parts: [{ size_bytes: 5 }],
+				tracks: [],
+				expires_at: "2025-01-01",
+				version: 2,
+				size_bytes: 5,
+			});
 		});
 	});
 });

@@ -1,61 +1,80 @@
 import { format, transports, createLogger } from "winston";
 import path from "path";
-import fs from "fs";
 
 import { LOGS_DIR } from "./Directories";
 import { redact, registerSecret, scrubString } from "./Security";
-
-if (fs.existsSync(LOGS_DIR)) {
-	fs.readdirSync(LOGS_DIR).forEach((file) => {
-		fs.unlinkSync(path.join(LOGS_DIR, file));
-	});
-}
 
 const sillyLogFile = path.join(LOGS_DIR, "silly.log");
 const debugLogFile = path.join(LOGS_DIR, "debug.log");
 
 const DEBUG_MODE = process.env.DEBUG === "true";
 
+// Logs are kept across runs (a crash would otherwise take its own log with it
+// at the next start) and rotated instead: at most LOG_FILES files of
+// LOG_FILE_BYTES each per level, the newest always under the plain name.
+const LOG_FILE_BYTES = 10 * 1024 * 1024;
+const LOG_FILES = 3;
+
+type Info = Parameters<Parameters<typeof format.printf>[0]>[0];
+
 export function getFormat(fileTransport: boolean = false) {
-	return format.printf(({ timestamp, level, message, fn, ...rest }) => {
+	return format.printf((info: Info): string => {
+		const {
+			timestamp,
+			level,
+			message: rawMessage,
+			fn,
+			...rawRest
+		} = info as Info & { timestamp?: string; fn?: string };
 		// Never write credentials: LogMethod logs every argument, including
 		// passwords, tokens and signed download URLs.
-		message = redact(message) as typeof message;
-		rest = redact(rest) as typeof rest;
+		const message = redact(rawMessage);
+		const rest = redact(rawRest) as Record<string, unknown>;
 
 		if (!DEBUG_MODE && !fileTransport && level.includes("info")) {
-			return message;
+			return typeof message === "string" ? message : JSON.stringify(message);
 		}
 
 		const timeStr = timestamp ? `${timestamp} - ` : "";
+		const fnStr = fn ? ` ${fn}` : "";
 
-		let msg = `${timeStr}(${level}) - Uncategorized Log Message | ${JSON.stringify(
-			message
-		)}\n${JSON.stringify(rest)}}`;
-
-		if (typeof message === "object") {
-			const fnStr = message.fn ? ` ${message.fn}` : "";
-			delete message.fn;
-			msg = `${timeStr}(${level})${fnStr}`;
-			for (const key in message) {
-				msg += `\n${key}: ${JSON.stringify(message[key], null, 2)}`;
+		let msg: string;
+		if (typeof message === "object" && message !== null) {
+			const { fn: messageFn, ...fields } = message as Record<string, unknown>;
+			msg = `${timeStr}(${level})${messageFn ? ` ${messageFn}` : ""}`;
+			for (const [key, value] of Object.entries(fields)) {
+				msg += `\n${key}: ${JSON.stringify(value, null, 2)}`;
 			}
 		} else if (message) {
-			const fnStr = fn ? ` ${fn}` : "";
 			msg = `${timeStr}(${level})${fnStr} | ${message}`;
 		} else {
 			// no message, try to render fn and rest
-			const fnStr = fn ? ` ${fn}` : "";
 			msg = `${timeStr}(${level})${fnStr}`;
 		}
 
-		for (const key in rest) {
-			msg += `\n${key}: ${JSON.stringify(rest[key], null, 2)}`;
+		for (const [key, value] of Object.entries(rest)) {
+			msg += `\n${key}: ${JSON.stringify(value, null, 2)}`;
 		}
 
 		return scrubString(msg);
 	});
 }
+
+const fileTransport = (filename: string, level: string) =>
+	new transports.File({
+		format: format.combine(
+			format.errors({ stack: true }),
+			format.splat(),
+			format.timestamp(),
+			getFormat(true)
+		),
+		filename,
+		level,
+		maxsize: LOG_FILE_BYTES,
+		maxFiles: LOG_FILES,
+		tailable: true,
+		options: { flags: "a", mode: 0o600 },
+	});
 
 const logger = createLogger({
 	level: DEBUG_MODE ? "debug" : "info",
@@ -71,28 +90,8 @@ const logger = createLogger({
 				getFormat()
 			),
 		}),
-		new transports.File({
-			format: format.combine(
-				format.errors({ stack: true }),
-				format.splat(),
-				format.timestamp(),
-				getFormat(true)
-			),
-			filename: sillyLogFile,
-			options: { flags: "a", mode: 0o600 },
-			level: "silly",
-		}),
-		new transports.File({
-			format: format.combine(
-				format.errors({ stack: true }),
-				format.splat(),
-				format.timestamp(),
-				getFormat(true)
-			),
-			filename: debugLogFile,
-			options: { flags: "a", mode: 0o600 },
-			level: "debug",
-		}),
+		fileTransport(sillyLogFile, "silly"),
+		fileTransport(debugLogFile, "debug"),
 	],
 });
 
@@ -149,6 +148,23 @@ export function LogMethod(
 
 		return descriptor;
 	};
+}
+
+/**
+ * Exit once every transport has written what it holds. A plain process.exit
+ * right after a log call can drop the very line that explains the exit.
+ */
+export function exitAfterLogs(code: number): void {
+	process.exitCode = code;
+	// Anything still logging after this point (an in-flight download) must
+	// not turn a clean exit into a crash.
+	logger.on("error", () => {});
+	const fallback = setTimeout(() => process.exit(code), 2_000);
+	logger.once("finish", () => {
+		clearTimeout(fallback);
+		process.exit(code);
+	});
+	logger.end();
 }
 
 export default logger;

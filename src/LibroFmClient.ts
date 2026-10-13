@@ -80,7 +80,7 @@ export default class LibroFmClient {
 	}
 
 	/**
-	 * Log in again when the authToken is gone (a failed request clears it).
+	 * Log in again when the authToken is gone (a rejected token clears it).
 	 * Never prompts: the background service has no terminal. Throws a
 	 * CredentialsError when retrying can't help.
 	 */
@@ -96,61 +96,59 @@ export default class LibroFmClient {
 		await this.login(username, password);
 	}
 
-	/** Fetches the library of audiobooks. */
+	/**
+	 * Fetches the whole library. When Libro.fm turns the session token down
+	 * (expired or revoked), logs in again with the configured credentials and
+	 * retries once. Any other failure is thrown: a partial library must never
+	 * pass for the whole one.
+	 */
 	@LogMethod({ scope, message: "Fetching library..." })
 	async getLibrary(): Promise<AudiobookMap> {
-		if (!this.config.authToken) throw new Error("Not logged in");
-		let audiobooks: AudiobookMap = {};
-		let page = 1;
-		while (true) {
-			try {
-				const data = await APIHandler.fetchLibrary(
-					this.config.authToken,
-					page
-				);
-
-				for (const book of data.audiobooks) {
-					audiobooks[book.isbn] = book;
-				}
-
-				if (page >= data.total_pages) {
-					break;
-				}
-				page += 1;
-			} catch (error: any) {
-				logger.error(`Failed to fetch library: ${error.message}`, {
-					fn: "LibroFmClient.getLibrary",
-				});
-				this.config.change({ authToken: undefined });
-				break;
-			}
+		try {
+			return await this.fetchLibraryPages();
+		} catch (error) {
+			if (!APIHandler.isAuthFailure(error)) throw error;
+			logger.warn(
+				`Libro.fm rejected the session token (${(error as Error).message}); logging in again`,
+				{ fn: "LibroFmClient.getLibrary" }
+			);
+			this.config.change({ authToken: undefined });
+			await this.ensureLoggedIn();
+			return this.fetchLibraryPages();
 		}
-
-		return audiobooks;
 	}
 
-	/** Downloads a list of books. */
-	@LogMethod({ scope, message: "Downloading books..." })
+	/** Every page of the library, keyed by ISBN. */
+	private async fetchLibraryPages(): Promise<AudiobookMap> {
+		const { authToken } = this.config;
+		if (!authToken) throw new Error("Not logged in");
+		const audiobooks: AudiobookMap = {};
+		for (let page = 1; ; page++) {
+			const data = await APIHandler.fetchLibrary(authToken, page);
+			for (const book of data.audiobooks) {
+				audiobooks[book.isbn] = book;
+			}
+			if (page >= data.total_pages) return audiobooks;
+		}
+	}
+
+	/**
+	 * Downloads one book into the download directory and records it in the
+	 * state. Returns the book's folder, or "" when an already downloaded book
+	 * was left alone.
+	 */
+	@LogMethod({ scope, message: "Downloading book..." })
 	async downloadBook(
 		book: Audiobook,
 		overwrite: boolean = false,
 		keepZip: boolean = false
 	): Promise<string> {
-		if (!this.config.authToken) throw new Error("Not logged in");
-		const authToken = this.config.authToken;
+		const { authToken } = this.config;
+		if (!authToken) throw new Error("Not logged in");
 
-		// fetch download links
-		const metadata = await this.getDownloadMetadata(book.isbn);
-
-		logger.verbose(`Downloading book: ${metadata.isbn}`, {
-			fn: "LibroFmClient.downloadBook",
-		});
-		const urls = metadata.parts.map((p) => p.url);
-
-		// check if book is already downloaded
+		// Already downloaded? Ask before fetching a manifest that may go unused.
 		if (!overwrite && this.state.hasBook(book.isbn)) {
-			const shouldOverwrite = await InputHandler.requestOverwrite(book);
-			if (!shouldOverwrite) {
+			if (!(await InputHandler.requestOverwrite(book))) {
 				logger.verbose("Skipping download", {
 					fn: "LibroFmClient.downloadBook",
 				});
@@ -159,6 +157,11 @@ export default class LibroFmClient {
 		}
 
 		try {
+			const metadata = await this.getDownloadMetadata(book.isbn);
+			logger.verbose(`Downloading book: ${metadata.isbn}`, {
+				fn: "LibroFmClient.downloadBook",
+			});
+
 			if (!book.authors) throw new Error("No authors found");
 			const authors =
 				typeof book.authors === "string"
@@ -180,25 +183,30 @@ export default class LibroFmClient {
 
 			const [path, zipped_files] = await DownloadCLient.downloadFiles(
 				filename,
-				urls,
+				metadata.parts.map((p) => p.url),
 				authToken,
 				keepZip,
 				this.config.downloadDir
 			);
 
-			await DownloadCLient.saveMetadata(book, metadata, path);
+			// Neither metadata.json nor state.json keeps the signed part URLs.
+			const stored = DownloadCLient.storedMetadata(metadata);
+			await DownloadCLient.saveMetadata(book, stored, path);
 
 			this.state.addBook({
 				book,
 				path,
-				meta: metadata,
+				meta: stored,
 				...(zipped_files && { zippedPaths: zipped_files }),
 			});
 
-			return filename;
+			return path;
 		} catch (error) {
 			logger.error({ error, fn: "LibroFmClient.downloadBook" });
-			throw new Error("Failed to download books");
+			throw new Error(
+				`Failed to download "${book.title}": ${(error as Error)?.message ?? error}`,
+				{ cause: error }
+			);
 		}
 	}
 

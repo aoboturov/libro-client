@@ -24,6 +24,8 @@ Then either run `bin/libro` directly or add `bin/` to your `PATH`:
 ./bin/libro
 ```
 
+Settings, the session token and logs live in `data/`, and books in `downloads/`, both next to the project. The standalone binary remembers the directory it was built in and keeps using it while that directory exists; copied to another machine it falls back to `~/.local/share/libro` (or `$XDG_DATA_HOME/libro`). Set `LIBROFM_DATA_DIR` to keep the app data somewhere else, and `LIBROFM_DOWNLOAD_DIR` for the books.
+
 ### List audiobooks
 
 To list all audiobooks in your library, run the following command:
@@ -51,6 +53,8 @@ libro get
 Replace `[...isbns]` with the ISBN of the audiobook you want to download. You can find the ISBN by running the list command.
 
 If you don't specify an ISBN, the tool will prompt you to select an audiobook from your library.
+
+With several ISBNs, up to 4 books are downloaded at a time (`LIBROFM_PARALLEL_DOWNLOADS`). Books you already have are asked about first, one at a time, unless `--overwrite` is given. One failed download doesn't stop the others; the command exits with status 1 if any book could not be downloaded.
 
 A book only shows up in your download folder once it is complete. Its zip parts are streamed to a hidden `.libro-partial` folder inside the download folder, unpacked there, and then moved into place, so a failed or interrupted download never leaves a partial book behind. If the tool is killed mid-download, the next attempt at that book clears what was left; you can also delete `.libro-partial` yourself while nothing is downloading.
 
@@ -98,9 +102,11 @@ The tool can also be run as a background service. This is useful if you want to 
 
 To run the service, you can use Docker or another process manager.
 
-Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env`). When a request fails, the saved session token is dropped and the service logs in again with these before the next check. If Libro.fm is unreachable or answers with a server error, the service keeps trying at each check, also at startup.
+Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env`). When Libro.fm rejects the saved session token (it expired or was revoked), the service logs in again with these and retries at once. If Libro.fm is unreachable, rate-limits, or answers with a server error, the token is kept and the service tries again at the next check, also at startup. A request that gets no answer within 30 seconds, or a download that receives no data for 60 seconds, is given up and retried at the next check rather than holding the service forever.
 
-If Libro.fm rejects the username or password, or there are none, the service stops with exit status 78 instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. Fix the credentials and start it again. A username saved in `data/config/config.json` by an earlier interactive login takes precedence over `LIBROFM_USERNAME`.
+If Libro.fm rejects the username or password, or there are none, the service stops with exit status 78 instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. Fix the credentials and start it again. `LIBROFM_USERNAME` overrides a username saved in `data/config/config.json` by an earlier interactive login, and switching accounts discards the saved session token.
+
+The service stops on `SIGTERM` or `SIGINT` (`docker stop`, Ctrl-C). A download in progress is dropped: it never reaches the download folder half done, and the next start downloads the book again.
 
 ### Docker
 
@@ -127,15 +133,25 @@ DEBUG=true                          # enable debug-level logging (default: off)
 LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
-LIBROFM_PARALLEL_DOWNLOADS=4        # background service: new books downloaded at the same time (default: 4)
+LIBROFM_PARALLEL_DOWNLOADS=4        # books downloaded at the same time, by the service and by `get` (default: 4)
+LIBROFM_DOWNLOAD_DIR=<path>         # where books go (default: ./downloads, or the folder chosen at the first interactive run)
+LIBROFM_DATA_DIR=<path>             # where settings, the session token and logs live (default: ./data)
 ```
+
+Environment variables take precedence over the values saved in `data/config/config.json`.
 
 ### Where your credentials go
 
 - Your password is only sent to `https://libro.fm/oauth/token`. It is never written to disk: after
   the first login, only your username and the session token are kept in `data/config/config.json`,
   readable by your user only.
-- Logs in `data/logs/` redact passwords, tokens and signed download links.
+- Logs in `data/logs/` redact passwords, tokens and signed download links. They are kept across
+  runs and rotated (at most 3 files of 10 MB per level), so the log of a crash survives the restart.
+- The `metadata.json` saved next to each book, and `data/config/state.json`, keep the download
+  manifest without its signed, expiring part URLs, so a shared download folder never holds a
+  working download link.
+- `config.json` and `state.json` are replaced in one step (written to a temp file, then renamed),
+  so a crash mid-write can't leave them truncated.
 - The Docker image never includes `data/`; mount it as a volume (see `docker-compose.yml`).
 
 ## Contributing

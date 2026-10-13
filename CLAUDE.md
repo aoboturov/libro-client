@@ -23,14 +23,18 @@ src/
   LibroFmClient.ts  — Main client: login, getLibrary, downloadBook, getNewBooks, getHistory
   APIHandler.ts     — HTTP layer: login, library, download-manifest endpoints
   lib/
-    Config.ts       — Credentials config (env vars + JSON file in data/config/)
-    Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/)
+    Config.ts       — Credentials config (JSON file in data/config/, overridden by env vars)
+    Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/). LIBROFM_DATA_DIR
+                      overrides data/; a compiled binary whose build dir is gone uses
+                      $XDG_DATA_HOME/libro
     DownloadClient.ts — File download + zip extraction: parts are streamed to disk (never
                       whole in memory) in <download dir>/.libro-partial, unzipped there
                       with yauzl one entry at a time, and moved into place with renames
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
-    Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials)
-    Security.ts     — Secret redaction, libro.fm host check, path guards, 0600 file writes
+    Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials). Log files are
+                      kept across runs and rotated (3 × 10 MB per level); exitAfterLogs()
+    Security.ts     — Secret redaction, libro.fm host check, path guards, atomic (temp + rename)
+                      and 0600 file writes, readJsonObject()
     History.ts      — Per-title listening history from library user_metadata (text/JSON/CSV)
     State.ts        — Local book state (data/config/state.json)
     Concurrency.ts  — mapWithLimit: Promise.all with a cap on calls running at once
@@ -41,14 +45,20 @@ src/
 
 1. `Config` loads credentials from env (`LIBROFM_USERNAME`, `LIBROFM_PASSWORD`) or `data/config/config.json`
 2. `LibroFmClient.init()` logs in via `APIHandler` if no authToken, saves token to config.
-   A failed library fetch clears the token; the service calls `ensureLoggedIn()` before each
-   check to log in again from the configured credentials (never prompts). Missing or rejected
-   credentials throw `CredentialsError` (see `APIHandler.isRejectedLogin`): the service exits
-   with status 78 and the CLI prints the message. Network errors, 429/5xx and the ELB gate's
-   empty 401 are thrown as is and retried at the next check
+   `getLibrary()` fetches every page or throws; it never returns a partial library. When the
+   API answers 401/403 (`APIHandler.isAuthFailure`) the token is cleared, `ensureLoggedIn()`
+   logs in again from the configured credentials (never prompts) and the fetch is retried
+   once. Missing or rejected credentials throw `CredentialsError` (see
+   `APIHandler.isRejectedLogin`): the service exits with status 78 and the CLI prints the
+   message. Network errors, 429/5xx and the ELB gate's empty 401 are thrown as is, the token
+   is kept, and the service retries at the next check. Every API request times out after
+   `APIHandler.requestTimeoutMs`; a download part is aborted after `DownloadClient.stallTimeoutMs`
+   without data
 3. CLI commands call `client.getLibrary()` -> `APIHandler.fetchLibrary()` -> paginated API
 4. `client.downloadBook()` -> `APIHandler.fetchDownloadMetadata()` -> `DownloadClient.downloadFiles()`
-5. `State` tracks downloaded books in `data/config/state.json` (mode `0600`) as a map of ISBN → `StateData`
+5. `State` tracks downloaded books in `data/config/state.json` (mode `0600`) as a map of ISBN →
+   `StateData`. Its `meta`, like the `metadata.json` saved next to each book, is a
+   `StoredDownloadMetadata`: the manifest without its signed part URLs
 
 ### External Dependencies
 
@@ -102,12 +112,16 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 | `LIBROFM_USERNAME` | No | Libro.fm account email (fallback to interactive prompt) |
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
 | `LIBROFM_POLL_MINUTES` | No | Minutes between the background service's library checks (default 15; fractions allowed) |
-| `LIBROFM_PARALLEL_DOWNLOADS` | No | New books the background service downloads at the same time (default 4) |
+| `LIBROFM_PARALLEL_DOWNLOADS` | No | Books downloaded at the same time, by the service and by `get` with several ISBNs (default 4) |
+| `LIBROFM_DOWNLOAD_DIR` | No | Where books are saved (default `downloads/`, or the folder chosen at the first interactive run) |
+| `LIBROFM_DATA_DIR` | No | Where config, state, logs and cache live (default `data/`) |
 
 Only the username, auth token and download directory are persisted to `data/config/config.json`
-(mode `0600`; `data/` is `0700`). The password is never written to disk — a fresh login takes it
-from `LIBROFM_PASSWORD` or an interactive prompt, and an old config that still holds one is
-rewritten without it on the next start.
+(mode `0600`; `data/` is `0700`). Environment variables override the saved values, and when
+`LIBROFM_USERNAME` names a different account than the saved one, the saved token is discarded.
+The password is never written to disk — a fresh login takes it from `LIBROFM_PASSWORD` or an
+interactive prompt, and an old config that still holds one is rewritten without it on the next
+start.
 
 ## Handling secrets
 
@@ -121,4 +135,8 @@ rewritten without it on the next start.
   CDN part URLs are fetched without it.
 - Folder names built from API metadata go through `safePathSegment`, and writes are checked
   with `isWithin` (download dir, cache dir, zip entries).
+- Nothing on disk outside `data/config` holds a download credential: `DownloadClient.storedMetadata`
+  strips the signed part URLs from what `saveMetadata` and `State.addBook` keep.
+- The service and the CLI log only through `logger` (never `console.*`), so every line is
+  redacted. After a final log line, exit with `exitAfterLogs()` rather than `process.exit()`.
 - `.dockerignore` excludes `data/` — never bake `data/config` or `data/logs` into an image.

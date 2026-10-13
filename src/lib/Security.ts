@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { randomBytes } from "crypto";
 
 // Side-effect free on purpose: Logger, Config, DownloadClient and the tests all
 // import this module.
@@ -107,9 +108,61 @@ export function safePathSegment(name: string): string {
 	return cleaned === "" || /^\.+$/.test(cleaned) ? "_" : cleaned;
 }
 
-/** Write a file readable only by the current user. */
+/** Hidden temp file next to `file`, for writing it and renaming it over. */
+export function tempPathFor(file: string): string {
+	const suffix = randomBytes(6).toString("hex");
+	return path.join(
+		path.dirname(file),
+		`.${path.basename(file)}.${suffix}.tmp`
+	);
+}
+
+/**
+ * Write `data` to a temp file next to `file`, then rename it over `file`. The
+ * old file stays intact until the new one is complete, so a crash mid-write
+ * can't leave a truncated config or state file behind.
+ */
+export function writeFileAtomic(
+	file: string,
+	data: string | Uint8Array,
+	mode?: number
+): void {
+	const tmp = tempPathFor(file);
+	try {
+		fs.writeFileSync(tmp, data, mode === undefined ? {} : { mode });
+		// `mode` on write only applies when the file is created, and is
+		// subject to the umask; set it outright.
+		if (mode !== undefined) fs.chmodSync(tmp, mode);
+		fs.renameSync(tmp, file);
+	} catch (error) {
+		fs.rmSync(tmp, { force: true });
+		throw error;
+	}
+}
+
+/** Write a file readable only by the current user, replacing it in one step. */
 export function writePrivateFile(file: string, data: string): void {
-	fs.writeFileSync(file, data, { mode: 0o600 });
-	// `mode` only applies when the file is created; tighten existing files too.
-	fs.chmodSync(file, 0o600);
+	writeFileAtomic(file, data, 0o600);
+}
+
+/**
+ * Parse a JSON file that must hold an object, with an error that names the
+ * file: a corrupt config or state file is a problem the user has to fix, not
+ * a stack trace from JSON.parse.
+ */
+export function readJsonObject(file: string): Record<string, unknown> {
+	const text = fs.readFileSync(file, "utf-8");
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch (error) {
+		throw new Error(
+			`${file} is not valid JSON (${(error as Error).message}). Fix it, or move it aside to start afresh.`,
+			{ cause: error }
+		);
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error(`${file} must hold a JSON object. Fix it, or move it aside to start afresh.`);
+	}
+	return parsed as Record<string, unknown>;
 }

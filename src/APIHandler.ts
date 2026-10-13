@@ -39,6 +39,9 @@ export default class APIHandler {
 	// Also sent by the app's AuthInterceptor on every request.
 	static device = "libro-client";
 	static osVer = "Android 34";
+	// A request that never answers must not stall a check (or the whole
+	// service) forever. Downloads have their own stall detection.
+	static requestTimeoutMs = 30_000;
 
 	/** Fetch Login Data */
 	@LogMethod({
@@ -118,6 +121,18 @@ export default class APIHandler {
 	}
 
 	/**
+	 * True when the API turned the session token down (401 or 403): logging
+	 * in again is the only thing that can help. Not a network error, 429 or
+	 * 5xx — the same token should simply be retried later.
+	 */
+	static isAuthFailure(error: unknown): boolean {
+		return (
+			error instanceof ApiError &&
+			(error.status === 401 || error.status === 403)
+		);
+	}
+
+	/**
 	 * The app's DTOs type isbn as a long and the API has sent both strings and
 	 * numbers; keep it a string so it works as an AudiobookMap/State key.
 	 */
@@ -131,7 +146,10 @@ export default class APIHandler {
 		url: string,
 		opts: RequestInit
 	): Promise<T> {
-		const response = await fetch(url, opts);
+		const response = await fetch(url, {
+			...opts,
+			signal: AbortSignal.timeout(this.requestTimeoutMs),
+		});
 		if (!response.ok) throw await this.httpError(response);
 
 		const data: any = await response.json();

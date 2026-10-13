@@ -1,7 +1,7 @@
 import path from "path";
 import fs from "fs";
-import { createHash, randomBytes } from "crypto";
-import { Readable } from "stream";
+import { createHash } from "crypto";
+import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
 import type { ReadableStream } from "stream/web";
 import yauzl from "yauzl";
@@ -9,7 +9,12 @@ import yauzl from "yauzl";
 import APIHandler from "../APIHandler";
 import logger, { LogMethod } from "./Logger";
 import { CACHE_DIR, DOWNLOAD_DIR } from "./Directories";
-import { isLibroFmUrl, isWithin } from "./Security";
+import {
+	isLibroFmUrl,
+	isWithin,
+	tempPathFor,
+	writeFileAtomic,
+} from "./Security";
 
 const scope = "DownloadClient";
 
@@ -17,6 +22,13 @@ const scope = "DownloadClient";
 export default class DownloadCLient {
 	/** Hidden folder in the download directory where books are unpacked. */
 	static readonly stagingDirName = ".libro-partial";
+
+	/**
+	 * Give up on a part when no data has arrived for this long. A connection
+	 * that silently stalls would otherwise hold the book (and, in the service,
+	 * every later check) forever.
+	 */
+	static stallTimeoutMs = 60_000;
 
 	/**
 	 * Downloads a list of files and returns the paths.
@@ -104,18 +116,37 @@ export default class DownloadCLient {
 	}
 
 	/**
+	 * What is kept on disk about a download: the manifest without its part
+	 * URLs. Those are signed and expire, so they are download credentials
+	 * with no use after the download, and metadata.json often sits in a
+	 * shared folder.
+	 */
+	static storedMetadata(
+		meta: DownloadMetadata | StoredDownloadMetadata
+	): StoredDownloadMetadata {
+		return {
+			...meta,
+			parts: meta.parts.map(({ size_bytes }) => ({ size_bytes })),
+		};
+	}
+
+	/**
 	 * Save Audiobook object as JSON file alongside the downloaded files.
 	 */
 	@LogMethod({ scope, message: "Saving metadata..." })
 	static async saveMetadata(
 		book: Audiobook,
-		fileData: DownloadMetadata,
+		fileData: DownloadMetadata | StoredDownloadMetadata,
 		filepath: string
 	): Promise<void> {
 		const metadataPath = path.join(filepath, "metadata.json");
-		DownloadCLient.writeFileAtomic(
+		writeFileAtomic(
 			metadataPath,
-			JSON.stringify({ book, fileData }, null, 2)
+			JSON.stringify(
+				{ book, fileData: DownloadCLient.storedMetadata(fileData) },
+				null,
+				2
+			)
 		);
 	}
 
@@ -130,14 +161,34 @@ export default class DownloadCLient {
 		file: string,
 		signal?: AbortSignal
 	): Promise<void> {
-		const tmp = DownloadCLient.tempPathFor(file);
+		const tmp = tempPathFor(file);
+		// Abort when no bytes arrive for `stallTimeoutMs`. The timer runs from
+		// before the request, so a server that never answers is caught too.
+		const stall = new AbortController();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const rearm = () => {
+			clearTimeout(timer);
+			timer = setTimeout(
+				() =>
+					stall.abort(
+						new Error(
+							`Download stalled: no data for ${DownloadCLient.stallTimeoutMs / 1000}s`
+						)
+					),
+				DownloadCLient.stallTimeoutMs
+			);
+		};
+		const combined = signal
+			? AbortSignal.any([signal, stall.signal])
+			: stall.signal;
 		try {
 			// Only libro.fm itself gets the bearer token; part URLs on a CDN
 			// (or a lookalike such as evillibro.fm) are fetched without it.
 			const opts = isLibroFmUrl(url)
-				? { headers: APIHandler.getHeaders(authToken), signal }
-				: { signal };
+				? { headers: APIHandler.getHeaders(authToken), signal: combined }
+				: { signal: combined };
 
+			rearm();
 			const response = await fetch(url, opts);
 			// An error page (e.g. an expired signed URL) is not a zip.
 			if (!response.ok) {
@@ -151,14 +202,24 @@ export default class DownloadCLient {
 			// Rejects if the connection drops before the advertised length.
 			await pipeline(
 				Readable.fromWeb(response.body as ReadableStream),
+				new Transform({
+					transform(chunk, _encoding, callback) {
+						rearm();
+						callback(null, chunk);
+					},
+				}),
 				fs.createWriteStream(tmp),
-				{ signal }
+				{ signal: combined }
 			);
 			fs.renameSync(tmp, file);
 		} catch (error) {
 			fs.rmSync(tmp, { force: true });
-			logger.error({ error, fn: "DownloadClient.download" });
-			throw error;
+			// An abort surfaces as a bare AbortError; name the stall instead.
+			const cause = stall.signal.aborted ? stall.signal.reason : error;
+			logger.error({ error: cause, fn: "DownloadClient.download" });
+			throw cause;
+		} finally {
+			clearTimeout(timer);
 		}
 	}
 
@@ -222,27 +283,6 @@ export default class DownloadCLient {
 			} else {
 				fs.renameSync(from, to);
 			}
-		}
-	}
-
-	/** Hidden temp file next to `file`, for writing it and renaming it over. */
-	private static tempPathFor(file: string): string {
-		const suffix = randomBytes(6).toString("hex");
-		return path.join(
-			path.dirname(file),
-			`.${path.basename(file)}.${suffix}.tmp`
-		);
-	}
-
-	/** Write `data` to a temp file next to `file`, then rename it over `file`. */
-	private static writeFileAtomic(file: string, data: string | Uint8Array) {
-		const tmp = DownloadCLient.tempPathFor(file);
-		try {
-			fs.writeFileSync(tmp, data);
-			fs.renameSync(tmp, file);
-		} catch (error) {
-			fs.rmSync(tmp, { force: true });
-			throw error;
 		}
 	}
 

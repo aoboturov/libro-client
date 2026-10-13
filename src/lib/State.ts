@@ -1,7 +1,7 @@
 import fs from "fs";
 import { STATE_PATH } from "./Directories";
 import { LogMethod } from "./Logger";
-import { writePrivateFile } from "./Security";
+import { readJsonObject, writePrivateFile } from "./Security";
 
 const scope = "State";
 
@@ -55,8 +55,7 @@ export default class State {
 	private load(): StateDataMap | null {
 		let stateData: StateDataMap | null = null;
 		if (fs.existsSync(this.statePath)) {
-			const data = fs.readFileSync(this.statePath, "utf-8");
-			const parsed: StateDataMap = JSON.parse(data);
+			const parsed = readJsonObject(this.statePath) as StateDataMap;
 			// Older versions created the file as `{"downloadedAudioBooks": {}}`,
 			// which then loaded as a bogus entry. It is never an ISBN.
 			delete parsed.downloadedAudioBooks;
