@@ -136,6 +136,9 @@ LIBROFM_PARALLEL_DOWNLOADS=4        # background service: new books downloaded a
   the first login, only your username and the session token are kept in `data/config/config.json`,
   readable by your user only.
 - Logs in `data/logs/` redact passwords, tokens and signed download links.
+- The `metadata.json` saved next to each book, and `data/config/state.json`, keep the download
+  manifest without its signed, expiring part URLs, so a shared download folder never holds a
+  working download link.
 - `config.json` and `state.json` are replaced in one step (written to a temp file, then renamed),
   so a crash mid-write can't leave them truncated.
 - The Docker image never includes `data/`; mount it as a volume (see `docker-compose.yml`).

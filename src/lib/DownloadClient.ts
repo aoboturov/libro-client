@@ -116,18 +116,37 @@ export default class DownloadCLient {
 	}
 
 	/**
+	 * What is kept on disk about a download: the manifest without its part
+	 * URLs. Those are signed and expire, so they are download credentials
+	 * with no use after the download, and metadata.json often sits in a
+	 * shared folder.
+	 */
+	static storedMetadata(
+		meta: DownloadMetadata | StoredDownloadMetadata
+	): StoredDownloadMetadata {
+		return {
+			...meta,
+			parts: meta.parts.map(({ size_bytes }) => ({ size_bytes })),
+		};
+	}
+
+	/**
 	 * Save Audiobook object as JSON file alongside the downloaded files.
 	 */
 	@LogMethod({ scope, message: "Saving metadata..." })
 	static async saveMetadata(
 		book: Audiobook,
-		fileData: DownloadMetadata,
+		fileData: DownloadMetadata | StoredDownloadMetadata,
 		filepath: string
 	): Promise<void> {
 		const metadataPath = path.join(filepath, "metadata.json");
 		writeFileAtomic(
 			metadataPath,
-			JSON.stringify({ book, fileData }, null, 2)
+			JSON.stringify(
+				{ book, fileData: DownloadCLient.storedMetadata(fileData) },
+				null,
+				2
+			)
 		);
 	}
 

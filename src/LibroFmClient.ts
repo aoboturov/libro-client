@@ -189,12 +189,14 @@ export default class LibroFmClient {
 				this.config.downloadDir
 			);
 
-			await DownloadCLient.saveMetadata(book, metadata, path);
+			// Neither metadata.json nor state.json keeps the signed part URLs.
+			const stored = DownloadCLient.storedMetadata(metadata);
+			await DownloadCLient.saveMetadata(book, stored, path);
 
 			this.state.addBook({
 				book,
 				path,
-				meta: metadata,
+				meta: stored,
 				...(zipped_files && { zippedPaths: zipped_files }),
 			});
 

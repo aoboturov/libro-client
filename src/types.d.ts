@@ -4,7 +4,7 @@ type AudiobookMap = {
 
 type StateData = {
 	book: Audiobook;
-	meta: DownloadMetadata;
+	meta: StoredDownloadMetadata;
 	path: string;
 	zippedPaths?: string[];
 };
@@ -129,6 +129,14 @@ interface DownloadMetadata {
 	version: string | number;
 	size_bytes: number;
 }
+
+/**
+ * DownloadMetadata as kept on disk (state.json, metadata.json): the signed,
+ * expiring part URLs are dropped, so neither file holds a download credential.
+ */
+type StoredDownloadMetadata = Omit<DownloadMetadata, "parts"> & {
+	parts: { size_bytes: number }[];
+};
 
 interface TokenMetadata {
 	access_token: string;
