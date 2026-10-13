@@ -41,12 +41,12 @@ export function pollIntervalMs(
 	return ms;
 }
 
-/** New books the background service downloads at the same time. */
+/** New books downloaded at the same time (service, and `get` with several ISBNs). */
 export const DEFAULT_PARALLEL_DOWNLOADS = 4;
 
 /**
- * How many new books the background service downloads at once: the
- * LIBROFM_PARALLEL_DOWNLOADS env var (a whole number, 1 or more), or 4 if unset.
+ * How many books are downloaded at once: the LIBROFM_PARALLEL_DOWNLOADS env
+ * var (a whole number, 1 or more), or 4 if unset.
  */
 export function parallelDownloads(
 	value: string | undefined = process.env.LIBROFM_PARALLEL_DOWNLOADS
