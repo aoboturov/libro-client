@@ -319,29 +319,78 @@ describe("LibroFmClient", () => {
 			});
 		});
 
-		test("recovers after a failed library fetch clears the token", async () => {
-			loginReturns("new-token");
-			const fetchLibrary = spyOn(APIHandler, "fetchLibrary")
-				.mockRejectedValueOnce(new Error("Service Unavailable"))
-				.mockResolvedValue({
-					page: 1,
-					total_pages: 1,
-					audiobooks: [{ isbn: "001", title: "Book 1" }],
-					tags: [],
-				});
-			const config = fakeConfig({ authToken: "old-token" });
-			const client = makeClient(config);
+		describe("getLibrary", () => {
+			const page = (n: number, total: number, isbn: string): LibraryMetadata => ({
+				page: n,
+				total_pages: total,
+				audiobooks: [{ isbn, title: `Book ${isbn}` }],
+				tags: [],
+			});
 
-			// First check: the fetch fails and the token is dropped.
-			expect(await client.getLibrary()).toEqual({});
-			expect(config.authToken).toBeUndefined();
-			await expect(client.getLibrary()).rejects.toThrow("Not logged in");
+			test("a network or server error is passed on and the token kept", async () => {
+				const login = loginReturns("new-token");
+				spyOn(APIHandler, "fetchLibrary").mockRejectedValue(
+					new ApiError(503, "Service Unavailable")
+				);
+				const config = fakeConfig({ authToken: "old-token" });
 
-			// Next check: log in again, then the library loads.
-			await client.ensureLoggedIn();
-			const library = await client.getLibrary();
-			expect(Object.keys(library)).toEqual(["001"]);
-			expect(fetchLibrary).toHaveBeenLastCalledWith("new-token", 1);
+				await expect(makeClient(config).getLibrary()).rejects.toThrow(
+					"Service Unavailable"
+				);
+				expect(config.authToken).toBe("old-token");
+				expect(login).not.toHaveBeenCalled();
+			});
+
+			test("a failed later page fails the whole fetch, never a partial library", async () => {
+				spyOn(APIHandler, "fetchLibrary")
+					.mockResolvedValueOnce(page(1, 2, "001"))
+					.mockRejectedValueOnce(new TypeError("fetch failed"));
+
+				await expect(
+					makeClient(fakeConfig({ authToken: "old-token" })).getLibrary()
+				).rejects.toThrow("fetch failed");
+			});
+
+			test("a rejected token is dropped, then the client logs in again and retries", async () => {
+				const login = loginReturns("new-token");
+				const fetchLibrary = spyOn(APIHandler, "fetchLibrary")
+					.mockRejectedValueOnce(new ApiError(401, "Unauthorized"))
+					.mockResolvedValue(page(1, 1, "001"));
+				const config = fakeConfig({ authToken: "stale-token" });
+
+				const library = await makeClient(config).getLibrary();
+
+				expect(Object.keys(library)).toEqual(["001"]);
+				expect(login).toHaveBeenCalledTimes(1);
+				expect(config.authToken).toBe("new-token");
+				expect(fetchLibrary).toHaveBeenNthCalledWith(1, "stale-token", 1);
+				expect(fetchLibrary).toHaveBeenNthCalledWith(2, "new-token", 1);
+			});
+
+			test("a rejected token without credentials to log in again is a CredentialsError", async () => {
+				spyOn(APIHandler, "fetchLibrary").mockRejectedValue(
+					new ApiError(401, "Unauthorized")
+				);
+				const config = fakeConfig({ authToken: "stale-token", password: undefined });
+
+				await expect(makeClient(config).getLibrary()).rejects.toThrow(
+					CredentialsError
+				);
+				// The stale token is gone, so the next start logs in afresh.
+				expect(config.authToken).toBeUndefined();
+			});
+
+			test("a token rejected twice in a row is an error, not a loop", async () => {
+				loginReturns("new-token");
+				const fetchLibrary = spyOn(APIHandler, "fetchLibrary").mockRejectedValue(
+					new ApiError(401, "Unauthorized")
+				);
+
+				await expect(
+					makeClient(fakeConfig({ authToken: "stale-token" })).getLibrary()
+				).rejects.toThrow("HTTP 401");
+				expect(fetchLibrary).toHaveBeenCalledTimes(2);
+			});
 		});
 	});
 });

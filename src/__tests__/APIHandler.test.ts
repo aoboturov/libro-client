@@ -333,4 +333,27 @@ describe("APIHandler", () => {
 			expect(APIHandler.isRejectedLogin(error)).toBe(false);
 		});
 	});
+
+	describe("isAuthFailure", () => {
+		test("a 401 or 403 means the token was turned down", () => {
+			expect(APIHandler.isAuthFailure(new ApiError(401, "Unauthorized"))).toBe(true);
+			expect(
+				APIHandler.isAuthFailure(new ApiError(401, "Unauthorized", "invalid_token"))
+			).toBe(true);
+			expect(APIHandler.isAuthFailure(new ApiError(403, "Forbidden"))).toBe(true);
+		});
+
+		test("anything worth retrying with the same token is not", () => {
+			for (const error of [
+				new ApiError(429, "Too Many Requests"),
+				new ApiError(500, "Internal Server Error"),
+				new ApiError(503, "Service Unavailable"),
+				new ApiError(404, "Not Found"),
+				new TypeError("fetch failed"),
+				new Error("Service Unavailable"),
+			]) {
+				expect(APIHandler.isAuthFailure(error)).toBe(false);
+			}
+		});
+	});
 });
