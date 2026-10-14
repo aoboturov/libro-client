@@ -26,15 +26,18 @@ src/
     Config.ts       — Credentials config (JSON file in data/config/, overridden by env vars)
     Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/). LIBROFM_DATA_DIR
                       overrides data/; a compiled binary whose build dir is gone uses
-                      $XDG_DATA_HOME/libro
+                      $XDG_DATA_HOME/libro. Creates only the app data dirs (0700 where
+                      chmod is allowed); the download dir is created by the first download
     DownloadClient.ts — File download + zip extraction: parts are streamed to disk (never
                       whole in memory) in <download dir>/.libro-partial, unzipped there
                       with yauzl one entry at a time, and moved into place with renames
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
     Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials). Log files are
-                      kept across runs and rotated (3 × 10 MB per level); exitAfterLogs()
+                      kept across runs and rotated (3 × 10 MB per level); exitAfterLogs().
+                      Console colours only on a terminal (not in docker logs)
     Security.ts     — Secret redaction, libro.fm host check, path guards, atomic (temp + rename)
-                      and 0600 file writes, readJsonObject()
+                      and 0600 file writes, readJsonObject(), chmodIfPermitted() (EPERM from
+                      a mount the app doesn't own, or a ZFS ACL, leaves the mode to the ACL)
     History.ts      — Per-title listening history from library user_metadata (text/JSON/CSV)
     State.ts        — Local book state (data/config/state.json)
     Concurrency.ts  — mapWithLimit: Promise.all with a cap on calls running at once
@@ -49,9 +52,10 @@ src/
    API answers 401/403 (`APIHandler.isAuthFailure`) the token is cleared, `ensureLoggedIn()`
    logs in again from the configured credentials (never prompts) and the fetch is retried
    once. Missing or rejected credentials throw `CredentialsError` (see
-   `APIHandler.isRejectedLogin`): the service exits with status 78 and the CLI prints the
-   message. Network errors, 429/5xx and the ELB gate's empty 401 are thrown as is, the token
-   is kept, and the service retries at the next check. Every API request times out after
+   `APIHandler.isRejectedLogin`): the service stops checking but keeps running (a container
+   restart policy would restart an exited service and log in again every minute) and repeats
+   the error hourly; the CLI prints the message. Network errors, 429/5xx and the ELB gate's
+   empty 401 are thrown as is, the token is kept, and the service retries at the next check. Every API request times out after
    `APIHandler.requestTimeoutMs`; a download part is aborted after `DownloadClient.stallTimeoutMs`
    without data
 3. CLI commands call `client.getLibrary()` -> `APIHandler.fetchLibrary()` -> paginated API

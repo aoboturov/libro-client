@@ -8,6 +8,9 @@ const sillyLogFile = path.join(LOGS_DIR, "silly.log");
 const debugLogFile = path.join(LOGS_DIR, "debug.log");
 
 const DEBUG_MODE = process.env.DEBUG === "true";
+// Colour codes only for a terminal: a container's log viewer (docker logs,
+// TrueNAS) or a log file would show them as `[31merror[39m`.
+const COLOR = Boolean(process.stdout.isTTY || process.stderr.isTTY);
 
 // Logs are kept across runs (a crash would otherwise take its own log with it
 // at the next start) and rotated instead: at most LOG_FILES files of
@@ -86,7 +89,7 @@ const logger = createLogger({
 			format: format.combine(
 				format.errors({ stack: true }),
 				format.splat(),
-				format.colorize(),
+				...(COLOR ? [format.colorize()] : []),
 				getFormat()
 			),
 		}),
