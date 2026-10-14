@@ -2,6 +2,8 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 
+import { chmodIfPermitted } from "./Security";
+
 // Where the app keeps its files. Run from source (`bun run`), Docker or the npm
 // package, that is the project directory. A `bun build --compile` binary bakes
 // its build directory into __dirname instead, so a binary copied to another
@@ -30,16 +32,15 @@ const CACHE_DIR = path.join(APP_DIR, "cache");
 const LOGS_DIR = path.join(APP_DIR, "logs");
 const CONFIG_DIR = path.join(APP_DIR, "config");
 
-// Create directories if they don't exist. App data (token, logs, cache) is
-// private to the current user; downloads keep the default permissions.
-const privateDirs = new Set([APP_DIR, LOGS_DIR, CACHE_DIR, CONFIG_DIR]);
-for (const dir of [APP_DIR, LOGS_DIR, CACHE_DIR, CONFIG_DIR, DOWNLOAD_DIR]) {
-	const isPrivate = privateDirs.has(dir);
-	fs.mkdirSync(dir, { recursive: true, ...(isPrivate && { mode: 0o700 }) });
-	// Tighten a directory created by an older version or by hand.
-	if (isPrivate && (fs.statSync(dir).mode & 0o077) !== 0) {
-		fs.chmodSync(dir, 0o700);
-	}
+// Create the app data directories (token, logs, cache) if they don't exist,
+// private to the current user. The download directory is created by the
+// first download, wherever the config puts it: the default one may not be
+// writable (`/app` in the Docker image, for a container run as non-root).
+for (const dir of [APP_DIR, LOGS_DIR, CACHE_DIR, CONFIG_DIR]) {
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	// Tighten a directory created by an older version or by hand. A mount
+	// owned by someone else keeps the permissions its owner gave it.
+	if ((fs.statSync(dir).mode & 0o077) !== 0) chmodIfPermitted(dir, 0o700);
 }
 
 const STATE_PATH = path.join(CONFIG_DIR, "state.json");

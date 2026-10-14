@@ -104,13 +104,13 @@ To run the service, you can use Docker or another process manager.
 
 Give the service `LIBROFM_USERNAME` and `LIBROFM_PASSWORD` (for Docker, in `.env`). When Libro.fm rejects the saved session token (it expired or was revoked), the service logs in again with these and retries at once. If Libro.fm is unreachable, rate-limits, or answers with a server error, the token is kept and the service tries again at the next check, also at startup. A request that gets no answer within 30 seconds, or a download that receives no data for 60 seconds, is given up and retried at the next check rather than holding the service forever.
 
-If Libro.fm rejects the username or password, or there are none, the service stops with exit status 78 instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. Fix the credentials and start it again. `LIBROFM_USERNAME` overrides a username saved in `data/config/config.json` by an earlier interactive login, and switching accounts discards the saved session token.
+If Libro.fm rejects the username or password, or there are none, the service stops checking for new books instead of retrying. The same credentials would fail every time, and repeated failed logins can get an account locked. It keeps running and repeats the error in its log every hour, rather than exiting: a restart policy (Docker, TrueNAS, Kubernetes) restarts a service that exits, whatever its exit status, and it would log in again about once a minute. Fix the credentials and restart it. `LIBROFM_USERNAME` overrides a username saved in `data/config/config.json` by an earlier interactive login, and switching accounts discards the saved session token.
 
 The service stops on `SIGTERM` or `SIGINT` (`docker stop`, Ctrl-C). A download in progress is dropped: it never reaches the download folder half done, and the next start downloads the book again.
 
 ### Docker
 
-To run the service using Docker, use the following command:
+Every release publishes an image for amd64 and arm64 to `ghcr.io/aoboturov/libro-client`, tagged with its version and `latest`. To build and run your own instead:
 
 ```bash
 docker build -t libro .
@@ -122,6 +122,38 @@ Or use the provided `docker-compose.yml` file:
 ```bash
 docker-compose up -d
 ```
+
+The image runs as root unless told otherwise. It also runs as any other user (`--user`, or `user:` in Compose) that can write to the mounted folders; nothing else in the image needs to be writable.
+
+### TrueNAS
+
+On TrueNAS (24.10 or later), run the service as a custom app from the published image.
+
+1. Create a dataset for the app data, for example `tank/apps/libro`, with the **Apps** preset. It holds the session token, so don't share it over SMB or NFS. Pick or create the dataset the books go to as well, for example `tank/media/audiobooks`; it can be an SMB share.
+2. The app runs as the `apps` user (UID 568). In each dataset's permissions, give `apps` **Modify** access. Owning the datasets is not needed.
+3. Go to **Apps → Discover Apps**, open the ⋮ menu, choose **Install via YAML**, name the app `libro` and paste:
+
+   ```yaml
+   services:
+     libro:
+       image: ghcr.io/aoboturov/libro-client:latest
+       restart: unless-stopped
+       user: "568:568"
+       environment:
+         LIBROFM_USERNAME: "you@example.com"
+         LIBROFM_PASSWORD: "your-password"
+         LIBROFM_DATA_DIR: /data
+         LIBROFM_DOWNLOAD_DIR: /audiobooks
+         LIBROFM_POLL_MINUTES: "60"
+       volumes:
+         - /mnt/tank/apps/libro:/data
+         - /mnt/tank/media/audiobooks:/audiobooks
+   ```
+
+   Compose replaces `$NAME` in values, so write a `$` in the password as `$$`. Any setting from [Configuration](#configuration) can go under `environment`.
+4. Open the app's logs. It checks for new books when it starts, then every `LIBROFM_POLL_MINUTES`. If the log says the username or password was rejected, edit the app, fix them and save; saving restarts it.
+
+To choose when to upgrade, use a version tag such as `:0.1.30` instead of `latest`, and change it in the app's YAML.
 
 
 ## Configuration

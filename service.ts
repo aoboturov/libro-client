@@ -3,9 +3,9 @@ import { parallelDownloads, pollIntervalMs } from "@/lib/Config";
 import { mapWithLimit } from "@/lib/Concurrency";
 import logger, { exitAfterLogs } from "@/lib/Logger";
 
-// sysexits EX_CONFIG: a configuration problem that a restart won't fix.
-const EX_CONFIG = 78;
 const fn = "service";
+// How often a service waiting for new credentials says so again in the log.
+const CREDENTIALS_REMINDER_MS = 60 * 60_000;
 
 let timer: ReturnType<typeof setInterval> | undefined;
 let stopping = false;
@@ -17,14 +17,22 @@ const stop = (code: number) => {
 	exitAfterLogs(code);
 };
 
-/** Logging in again with the same credentials is pointless: stop instead. */
-const stopForCredentials = (error: CredentialsError) => {
-	logger.error(
-		`${error.message} Stopping the service: retrying with the same credentials won't help. ` +
-			"Fix LIBROFM_USERNAME / LIBROFM_PASSWORD and start it again.",
-		{ fn }
-	);
-	stop(EX_CONFIG);
+/**
+ * Logging in again with the same credentials is pointless, and repeated
+ * failed logins can get the account locked: stop checking. The service keeps
+ * running until it is stopped rather than exiting, because a restart policy
+ * (Docker, TrueNAS, Kubernetes) restarts an exited service whatever its exit
+ * status, and it would log in again about once a minute.
+ */
+const waitForCredentials = (error: CredentialsError) => {
+	stopping = true;
+	clearInterval(timer);
+	const reason =
+		`${error.message} Not checking for new books: retrying with the same credentials won't help. ` +
+		"Fix LIBROFM_USERNAME / LIBROFM_PASSWORD and restart the service.";
+	logger.error(reason, { fn });
+	// Also what keeps the process alive.
+	timer = setInterval(() => logger.error(reason, { fn }), CREDENTIALS_REMINDER_MS);
 };
 
 async function main() {
@@ -35,7 +43,7 @@ async function main() {
 	try {
 		await client.init();
 	} catch (error) {
-		if (error instanceof CredentialsError) return stopForCredentials(error);
+		if (error instanceof CredentialsError) return waitForCredentials(error);
 		// Network trouble or Libro.fm down: the first check logs in again.
 		logger.error("Could not log in yet; trying again at the next check", {
 			fn,
@@ -98,7 +106,7 @@ async function main() {
 			const newBooks = await scanLibrary();
 			if (newBooks.length > 0) await downloadBooks(newBooks);
 		} catch (error) {
-			if (error instanceof CredentialsError) return stopForCredentials(error);
+			if (error instanceof CredentialsError) return waitForCredentials(error);
 			logger.error(
 				`Check failed: ${(error as Error)?.message ?? error}. Trying again at the next check.`,
 				{ fn }

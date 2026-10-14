@@ -5,6 +5,7 @@ import path from "path";
 
 import {
 	REDACTED,
+	chmodIfPermitted,
 	forgetSecrets,
 	isLibroFmUrl,
 	isWithin,
@@ -203,6 +204,59 @@ describe("Security", () => {
 			}
 			expect(fs.readFileSync(file, "utf-8")).toBe('{"old": true}');
 			expect(fs.readdirSync(tmpDir)).toEqual(["state.json"]);
+		});
+	});
+
+	describe("chmodIfPermitted", () => {
+		let tmpDir: string;
+		const chmod = fs.chmodSync;
+
+		beforeEach(() => {
+			tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "libro-sec-test-"));
+		});
+
+		afterEach(() => {
+			fs.chmodSync = chmod;
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		});
+
+		const refuseChmod = (code: string) =>
+			spyOn(fs, "chmodSync").mockImplementation(() => {
+				throw Object.assign(new Error(`${code}: chmod refused`), { code });
+			});
+
+		test("sets the mode", () => {
+			expect(chmodIfPermitted(tmpDir, 0o700)).toBe(true);
+			expect(fs.statSync(tmpDir).mode & 0o777).toBe(0o700);
+		});
+
+		test("leaves the mode to the owner of a mount it can't change", () => {
+			// What a dataset owned by root with an ACL for the app's group, or
+			// a ZFS dataset with aclmode=restricted, answers.
+			const spy = refuseChmod("EPERM");
+			try {
+				expect(chmodIfPermitted(tmpDir, 0o700)).toBe(false);
+			} finally {
+				spy.mockRestore();
+			}
+		});
+
+		test("still throws other errors", () => {
+			expect(() => chmodIfPermitted(path.join(tmpDir, "missing"), 0o700)).toThrow(
+				"ENOENT"
+			);
+		});
+
+		test("a private file is still written where chmod is refused", () => {
+			const file = path.join(tmpDir, "config.json");
+			const spy = refuseChmod("EPERM");
+			try {
+				writePrivateFile(file, '{"username": "me"}');
+			} finally {
+				spy.mockRestore();
+			}
+			expect(fs.readFileSync(file, "utf-8")).toBe('{"username": "me"}');
+			expect(fs.readdirSync(tmpDir)).toEqual(["config.json"]);
 		});
 	});
 

@@ -118,6 +118,22 @@ export function tempPathFor(file: string): string {
 }
 
 /**
+ * chmod `target`, unless the file system refuses (EPERM): a mount the app
+ * doesn't own, such as a NAS dataset that grants the app's group access, or
+ * a ZFS dataset whose ACL forbids chmod (TrueNAS's SMB preset). The ACL its
+ * owner set then decides who can read it. Returns whether the mode was set.
+ */
+export function chmodIfPermitted(target: string, mode: number): boolean {
+	try {
+		fs.chmodSync(target, mode);
+		return true;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EPERM") return false;
+		throw error;
+	}
+}
+
+/**
  * Write `data` to a temp file next to `file`, then rename it over `file`. The
  * old file stays intact until the new one is complete, so a crash mid-write
  * can't leave a truncated config or state file behind.
@@ -132,7 +148,7 @@ export function writeFileAtomic(
 		fs.writeFileSync(tmp, data, mode === undefined ? {} : { mode });
 		// `mode` on write only applies when the file is created, and is
 		// subject to the umask; set it outright.
-		if (mode !== undefined) fs.chmodSync(tmp, mode);
+		if (mode !== undefined) chmodIfPermitted(tmp, mode);
 		fs.renameSync(tmp, file);
 	} catch (error) {
 		fs.rmSync(tmp, { force: true });
