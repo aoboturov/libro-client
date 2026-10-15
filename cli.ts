@@ -5,7 +5,7 @@ import { hideBin } from "yargs/helpers";
 
 import LibroFmClient from "@/LibroFmClient";
 import { mapWithLimit } from "@/lib/Concurrency";
-import { parallelDownloads } from "@/lib/Config";
+import { downloadFormat, parallelDownloads } from "@/lib/Config";
 import InputHandler from "@/lib/InputHandler";
 import logger, { exitAfterLogs } from "@/lib/Logger";
 import { toCsv, toJson, toText } from "@/lib/History";
@@ -65,9 +65,14 @@ const parser = yargs(hideBin(process.argv))
 						default: false,
 					},
 					keepZip: {
-						describe: "Keep the downloaded zip file",
+						describe: "Keep the downloaded zip file (MP3 downloads)",
 						type: "boolean",
 						default: false,
+					},
+					m4b: {
+						describe:
+							"Download a single m4b where Libro.fm has one, instead of MP3 tracks; --no-m4b for MP3 (default: LIBROFM_M4B)",
+						type: "boolean",
 					},
 					ignoreLocal: {
 						describe: "Ignore local state and download all books",
@@ -76,6 +81,9 @@ const parser = yargs(hideBin(process.argv))
 					},
 				}),
 		async (argv) => {
+			// --m4b / --no-m4b, else LIBROFM_M4B.
+			const format: BookFormat =
+				argv.m4b === undefined ? downloadFormat() : argv.m4b ? "m4b" : "mp3";
 			const library = await client.getLibrary();
 			const requested = (argv.isbns ?? []).map(String);
 			const missing = requested.filter((isbn) => !library[isbn]);
@@ -116,7 +124,12 @@ const parser = yargs(hideBin(process.argv))
 			await mapWithLimit(books, parallelDownloads(), async (book) => {
 				logger.info(`Downloading: ${book.title}`);
 				try {
-					const filepath = await client.downloadBook(book, true, argv.keepZip);
+					const filepath = await client.downloadBook(
+						book,
+						true,
+						argv.keepZip,
+						format
+					);
 					downloaded++;
 					logger.info(`Downloaded ${book.title} to ${filepath}`);
 				} catch (error) {

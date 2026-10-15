@@ -32,6 +32,7 @@ export default class APIHandler {
 	static loginEndpoint = "/oauth/token";
 	static libraryEndpoint = "/api/v12/library";
 	static downloadEndpoint = "/api/v12/download-manifest";
+	static packagedM4bEndpoint = "/api/v12/audiobooks/{isbn}/packaged_m4b";
 	static userAgent = "okhttp/4.12.0";
 	// Required since late 2025 — without it, /oauth/token returns 401 at the ELB
 	// before the request reaches the auth backend.
@@ -95,14 +96,58 @@ export default class APIHandler {
 		logger.verbose(`Fetching download metadata for ${isbn}...`, {
 			fn: "APIHandler.fetchDownloadMetadata",
 		});
-		// The app also sends `format=m4b` for a single packaged file; omitting it
-		// returns the multi-part ZIP manifest DownloadClient expects.
+		// The app also sends a `format`; omitting it returns the multi-part ZIP
+		// manifest DownloadClient expects. A single m4b comes from packaged_m4b.
 		const query = new URLSearchParams({ isbn, client_version: this.appVer });
 		const url = `${this.baseUrl}${this.downloadEndpoint}?${query}`;
 		const data = await this.fetchData<DownloadMetadata>(url, {
 			headers: this.getHeaders(authToken),
 		});
 		return { ...data, isbn: this.normalizeIsbn(data.isbn) };
+	}
+
+	/**
+	 * The signed, expiring download URL of a title's packaged m4b (one file,
+	 * chapters included), or undefined when Libro.fm has none for it: the app
+	 * then downloads the MP3 tracks of the download manifest instead. Errors
+	 * worth retrying (network, 401/403, 429, 5xx) are thrown, so a passing
+	 * outage doesn't turn an m4b into MP3s for good.
+	 */
+	@LogMethod({ scope, message: "Fetching packaged m4b...", secretArgs: [0] })
+	static async fetchPackagedM4bUrl(
+		authToken: string,
+		isbn: string
+	): Promise<string | undefined> {
+		const endpoint = this.packagedM4bEndpoint.replace(
+			"{isbn}",
+			encodeURIComponent(isbn)
+		);
+		try {
+			const data = await this.fetchData<{ m4b_url?: unknown }>(
+				`${this.baseUrl}${endpoint}`,
+				{ headers: this.getHeaders(authToken) }
+			);
+			return typeof data.m4b_url === "string" && data.m4b_url
+				? data.m4b_url
+				: undefined;
+		} catch (error) {
+			if (this.isNotAvailable(error)) return undefined;
+			throw error;
+		}
+	}
+
+	/**
+	 * The API answered that what was asked for isn't there (404 and other
+	 * 4xx, or an error in a 200 body), as opposed to a failure worth retrying:
+	 * a rejected token, a 429 or 5xx, or no answer at all.
+	 */
+	private static isNotAvailable(error: unknown): boolean {
+		return (
+			error instanceof ApiError &&
+			!this.isAuthFailure(error) &&
+			error.status !== 429 &&
+			(error.status === undefined || error.status < 500)
+		);
 	}
 
 	/**

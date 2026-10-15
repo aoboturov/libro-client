@@ -260,6 +260,69 @@ describe("APIHandler", () => {
 				expect(result.isbn).toBe("9781234567897");
 			});
 		});
+
+		describe("fetchPackagedM4bUrl", () => {
+			const m4bUrl = "https://cdn.example/book.m4b?Signature=s1g&Key-Pair-Id=K9";
+
+			/** An error response, with a JSON body when one is given. */
+			const failWith = (status: number, statusText: string, body?: object) =>
+				serve({
+					ok: false,
+					status,
+					statusText,
+					json: () =>
+						body ? Promise.resolve(body) : Promise.reject(new SyntaxError()),
+				});
+
+			test("asks for the title's packaged m4b with the token", async () => {
+				const fetchMock = serve({
+					ok: true,
+					json: () => Promise.resolve({ m4b_url: m4bUrl }),
+				});
+
+				const result = await APIHandler.fetchPackagedM4bUrl("token", "9781234567897");
+
+				const { url, headers } = firstCall(fetchMock);
+				expect(url).toBe(
+					"https://libro.fm/api/v12/audiobooks/9781234567897/packaged_m4b"
+				);
+				expect(headers.Authorization).toBe("Bearer token");
+				expect(headers["X-LibroFm-AppVer"]).toBe(APIHandler.appVer);
+				expect(result).toBe(m4bUrl);
+			});
+
+			test("a title without an m4b gives undefined", async () => {
+				failWith(404, "Not Found");
+				expect(await APIHandler.fetchPackagedM4bUrl("token", "1")).toBeUndefined();
+
+				failWith(422, "Unprocessable Entity", { error: "not_available" });
+				expect(await APIHandler.fetchPackagedM4bUrl("token", "1")).toBeUndefined();
+
+				serve({ ok: true, json: () => Promise.resolve({ m4b_url: null }) });
+				expect(await APIHandler.fetchPackagedM4bUrl("token", "1")).toBeUndefined();
+			});
+
+			test("failures worth retrying are thrown, not taken for a missing m4b", async () => {
+				for (const [status, statusText] of [
+					[401, "Unauthorized"],
+					[403, "Forbidden"],
+					[429, "Too Many Requests"],
+					[503, "Service Unavailable"],
+				] as const) {
+					failWith(status, statusText);
+					await expect(
+						APIHandler.fetchPackagedM4bUrl("token", "1")
+					).rejects.toThrow(`HTTP ${status}`);
+				}
+
+				globalThis.fetch = mock(() =>
+					Promise.reject(new TypeError("fetch failed"))
+				) as unknown as typeof fetch;
+				await expect(APIHandler.fetchPackagedM4bUrl("token", "1")).rejects.toThrow(
+					"fetch failed"
+				);
+			});
+		});
 	});
 
 	describe("isRejectedLogin", () => {

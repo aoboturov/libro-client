@@ -43,6 +43,80 @@ export default class DownloadCLient {
 		keepZip = false,
 		directory?: string,
 	): Promise<[string, string[] | false]> {
+		let zips: string[] = [];
+		const finalPath = await DownloadCLient.inStaging(
+			filename,
+			directory,
+			async (book, staging) => {
+				// Kept zips go straight to the cache; others live in staging.
+				zips = urls.map((_, idx) =>
+					keepZip
+						? path.join(CACHE_DIR, `${filename}-${idx}.zip`)
+						: path.join(staging, `part-${idx}.zip`)
+				);
+				// The first failure stops the other parts, and staging is only
+				// removed once every download has stopped writing to it.
+				const abort = new AbortController();
+				let failure: { error: unknown } | undefined;
+				await Promise.all(
+					urls.map(async (url, idx) => {
+						try {
+							await DownloadCLient.download(
+								url,
+								authToken,
+								zips[idx],
+								abort.signal
+							);
+						} catch (error) {
+							failure ??= { error };
+							abort.abort();
+						}
+					})
+				);
+				if (failure) throw failure.error;
+
+				// In part order, so a later part wins a name clash, as before.
+				for (const zip of zips) {
+					await DownloadCLient.unzip(zip, book);
+				}
+			}
+		);
+		return [finalPath, keepZip && zips];
+	}
+
+	/**
+	 * Downloads a book's packaged m4b into its folder as `<title>.m4b` (the
+	 * last segment of `filename`) and returns the folder. Like downloadFiles,
+	 * the file only reaches the download directory once it is complete.
+	 */
+	@LogMethod({ scope, message: "Downloading m4b...", secretArgs: [2] })
+	static async downloadM4b(
+		filename: string,
+		url: string,
+		authToken: string,
+		directory?: string
+	): Promise<string> {
+		return DownloadCLient.inStaging(filename, directory, (book) =>
+			DownloadCLient.download(
+				url,
+				authToken,
+				path.join(book, `${path.basename(filename)}.m4b`)
+			)
+		);
+	}
+
+	/**
+	 * Lets `fill` put a book together in an empty staging folder, then moves
+	 * it to `<directory>/<filename>` with renames only and returns that path.
+	 * Nothing is held in memory whole, so memory use stays small whatever the
+	 * book's size, and a failed or interrupted download never leaves a
+	 * partial book in the download directory.
+	 */
+	private static async inStaging(
+		filename: string,
+		directory: string | undefined,
+		fill: (book: string, staging: string) => Promise<void>
+	): Promise<string> {
 		const baseDir = directory || DOWNLOAD_DIR;
 		const finalPath = path.join(baseDir, filename);
 		if (
@@ -54,51 +128,15 @@ export default class DownloadCLient {
 			);
 		}
 
-		// Stream each part to disk, unpack the parts into a staging folder, then
-		// move the book into place with renames only. Nothing is held in memory
-		// whole, so memory use stays small whatever the book's size, and a
-		// failed or interrupted download never leaves a partial book in the
-		// download directory.
 		const staging = DownloadCLient.stagingPath(baseDir, filename);
 		const book = path.join(staging, "book");
 		// Left behind by an interrupted attempt at the same book.
 		fs.rmSync(staging, { recursive: true, force: true });
 		try {
 			fs.mkdirSync(book, { recursive: true });
-			// Kept zips go straight to the cache; others live in staging.
-			const zips = urls.map((_, idx) =>
-				keepZip
-					? path.join(CACHE_DIR, `${filename}-${idx}.zip`)
-					: path.join(staging, `part-${idx}.zip`)
-			);
-			// The first failure stops the other parts, and staging is only
-			// removed once every download has stopped writing to it.
-			const abort = new AbortController();
-			let failure: { error: unknown } | undefined;
-			await Promise.all(
-				urls.map(async (url, idx) => {
-					try {
-						await DownloadCLient.download(
-							url,
-							authToken,
-							zips[idx],
-							abort.signal
-						);
-					} catch (error) {
-						failure ??= { error };
-						abort.abort();
-					}
-				})
-			);
-			if (failure) throw failure.error;
-
-			// In part order, so a later part wins a name clash, as before.
-			for (const zip of zips) {
-				await DownloadCLient.unzip(zip, book);
-			}
+			await fill(book, staging);
 			DownloadCLient.moveIntoPlace(book, finalPath);
-
-			return [finalPath, keepZip && zips];
+			return finalPath;
 		} finally {
 			fs.rmSync(staging, { recursive: true, force: true });
 			DownloadCLient.removeIfEmpty(path.dirname(staging));
@@ -137,13 +175,14 @@ export default class DownloadCLient {
 	static async saveMetadata(
 		book: Audiobook,
 		fileData: DownloadMetadata | StoredDownloadMetadata,
-		filepath: string
+		filepath: string,
+		format: BookFormat = "mp3"
 	): Promise<void> {
 		const metadataPath = path.join(filepath, "metadata.json");
 		writeFileAtomic(
 			metadataPath,
 			JSON.stringify(
-				{ book, fileData: DownloadCLient.storedMetadata(fileData) },
+				{ book, format, fileData: DownloadCLient.storedMetadata(fileData) },
 				null,
 				2
 			)

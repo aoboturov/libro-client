@@ -421,6 +421,54 @@ describe("DownloadClient", () => {
 		});
 	});
 
+	describe("downloadM4b", () => {
+		const book = "Author/Series/Title";
+		const url = "https://cdn.example/book.m4b?Signature=s1g";
+
+		afterEach(() => {
+			mock.restore();
+		});
+
+		function serve(response: Response) {
+			return spyOn(globalThis, "fetch").mockResolvedValue(response);
+		}
+
+		test("places the m4b in the book's folder, named after the title", async () => {
+			const fetchMock = serve(new Response("m4b-bytes"));
+
+			const finalPath = await DownloadClient.downloadM4b(book, url, "token", downloadDir);
+
+			expect(finalPath).toBe(path.join(downloadDir, book));
+			expect(files(finalPath)).toEqual(["Title.m4b"]);
+			expect(fs.readFileSync(path.join(finalPath, "Title.m4b"), "utf-8")).toBe(
+				"m4b-bytes"
+			);
+			expect(fs.existsSync(path.join(downloadDir, DownloadClient.stagingDirName))).toBe(
+				false
+			);
+			// A CDN URL never gets the bearer token.
+			const opts = fetchMock.mock.calls[0]?.[1] as RequestInit;
+			expect(JSON.stringify(opts.headers ?? {})).not.toContain("token");
+		});
+
+		test("an HTTP error fails with the status and writes nothing", async () => {
+			serve(new Response("<html>Forbidden</html>", { status: 403, statusText: "Forbidden" }));
+
+			await expect(
+				DownloadClient.downloadM4b(book, url, "token", downloadDir)
+			).rejects.toThrow("Download failed: HTTP 403 Forbidden");
+			expect(fs.readdirSync(downloadDir)).toEqual([]);
+		});
+
+		test("refuses a book path that leaves the download directory", async () => {
+			const fetchMock = serve(new Response("m4b-bytes"));
+			await expect(
+				DownloadClient.downloadM4b("../outside", url, "token", downloadDir)
+			).rejects.toThrow("Refusing to write outside the download directory");
+			expect(fetchMock).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("atomic writes", () => {
 		test("saveMetadata replaces metadata.json and leaves no temp file", async () => {
 			const bookDir = path.join(downloadDir, "Book");

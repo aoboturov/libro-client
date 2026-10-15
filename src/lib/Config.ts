@@ -63,6 +63,24 @@ export function parallelDownloads(
 	return count;
 }
 
+export const DEFAULT_FORMAT: BookFormat = "mp3";
+
+/**
+ * The format books are downloaded in: m4b when the LIBROFM_M4B env var is
+ * true (also 1, yes, on), mp3 when it is false or unset. The Docker image
+ * sets it to true. A title Libro.fm has no m4b of is downloaded as MP3
+ * tracks either way.
+ */
+export function downloadFormat(
+	value: string | undefined = process.env.LIBROFM_M4B
+): BookFormat {
+	if (value === undefined || value.trim() === "") return DEFAULT_FORMAT;
+	const flag = value.trim().toLowerCase();
+	if (["true", "1", "yes", "on"].includes(flag)) return "m4b";
+	if (["false", "0", "no", "off"].includes(flag)) return "mp3";
+	throw new Error(`LIBROFM_M4B must be true or false, got "${value}"`);
+}
+
 /**
  * A directory as the user typed it (`~/Books`, `../books`) made absolute, so
  * it means the same folder whatever the working directory is later.

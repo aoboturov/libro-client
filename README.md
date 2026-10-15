@@ -54,11 +54,19 @@ Replace `[...isbns]` with the ISBN of the audiobook you want to download. You ca
 
 If you don't specify an ISBN, the tool will prompt you to select an audiobook from your library.
 
+Books come as MP3 tracks, one file per chapter. To get a single `.m4b` file per book instead (one file with chapter markers, the usual format for audiobook players and Audiobookshelf), add `--m4b` or set `LIBROFM_M4B=true`; `--no-m4b` asks for MP3 tracks whatever `LIBROFM_M4B` says. The Docker image downloads m4b files unless told otherwise.
+
+```bash
+libro get --m4b 9780593135204
+```
+
+The m4b is the one Libro.fm packages itself, saved as `<title>.m4b` in the book's folder; nothing is converted on your machine. Libro.fm doesn't offer an m4b of every title: those books are downloaded as MP3 tracks, and the log says so. `--keep-zip` only applies to MP3 downloads. Books you already have stay as they are; downloading one again in the other format (`--overwrite`) adds the new files next to the old ones, so delete the book's folder first if you only want the new format.
+
 With several ISBNs, up to 4 books are downloaded at a time (`LIBROFM_PARALLEL_DOWNLOADS`). Books you already have are asked about first, one at a time, unless `--overwrite` is given. One failed download doesn't stop the others; the command exits with status 1 if any book could not be downloaded.
 
-A book only shows up in your download folder once it is complete. Its zip parts are streamed to a hidden `.libro-partial` folder inside the download folder, unpacked there, and then moved into place, so a failed or interrupted download never leaves a partial book behind. If the tool is killed mid-download, the next attempt at that book clears what was left; you can also delete `.libro-partial` yourself while nothing is downloading.
+A book only shows up in your download folder once it is complete. Its m4b, or its zip parts, are streamed to a hidden `.libro-partial` folder inside the download folder, unpacked there, and then moved into place, so a failed or interrupted download never leaves a partial book behind. If the tool is killed mid-download, the next attempt at that book clears what was left; you can also delete `.libro-partial` yourself while nothing is downloading.
 
-Downloads go straight to disk and are never held in memory whole, so memory use stays at a few tens of MB however large the book is. While a book downloads, the download folder needs free space for about twice its size (the zip parts plus the unpacked files).
+Downloads go straight to disk and are never held in memory whole, so memory use stays at a few tens of MB however large the book is. While an MP3 book downloads, the download folder needs free space for about twice its size (the zip parts plus the unpacked files); an m4b needs only its own size.
 
 ### Check for new audiobooks
 
@@ -98,7 +106,7 @@ Libro.fm's API has no endpoint that returns individual listening sessions (the a
 
 ## Background service
 
-The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library. It downloads up to 4 new books at a time (`LIBROFM_PARALLEL_DOWNLOADS`), so the first run on a large library takes a while; checks that come due meanwhile are skipped.
+The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library. It downloads up to 4 new books at a time (`LIBROFM_PARALLEL_DOWNLOADS`), as MP3 tracks or, with `LIBROFM_M4B=true` (the Docker image's default), as one m4b each, so the first run on a large library takes a while; checks that come due meanwhile are skipped.
 
 To run the service, you can use Docker or another process manager.
 
@@ -122,6 +130,8 @@ Or use the provided `docker-compose.yml` file:
 ```bash
 docker-compose up -d
 ```
+
+The image downloads each book as one m4b file where Libro.fm has one (`LIBROFM_M4B=true`); set `LIBROFM_M4B=false` in its environment for MP3 tracks, one file per chapter.
 
 The image runs as root unless told otherwise. It also runs as any other user (`--user`, or `user:` in Compose) that can write to the mounted folders; nothing else in the image needs to be writable.
 
@@ -150,7 +160,7 @@ On TrueNAS (24.10 or later), run the service as a custom app from the published 
          - /mnt/tank/media/audiobooks:/audiobooks
    ```
 
-   Compose replaces `$NAME` in values, so write a `$` in the password as `$$`. Any setting from [Configuration](#configuration) can go under `environment`.
+   Compose replaces `$NAME` in values, so write a `$` in the password as `$$`. Any setting from [Configuration](#configuration) can go under `environment`; add `LIBROFM_M4B: "false"` there to get MP3 tracks instead of one m4b per book.
 4. Open the app's logs. It checks for new books when it starts, then every `LIBROFM_POLL_MINUTES`. If the log says the username or password was rejected, edit the app, fix them and save; saving restarts it.
 
 To choose when to upgrade, use a version tag such as `:0.1.30` instead of `latest`, and change it in the app's YAML.
@@ -166,6 +176,7 @@ LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
 LIBROFM_PARALLEL_DOWNLOADS=4        # books downloaded at the same time, by the service and by `get` (default: 4)
+LIBROFM_M4B=true                    # one m4b file per book where Libro.fm has one, instead of MP3 tracks (default: false; true in the Docker image)
 LIBROFM_DOWNLOAD_DIR=<path>         # where books go (default: ./downloads, or the folder chosen at the first interactive run)
 LIBROFM_DATA_DIR=<path>             # where settings, the session token and logs live (default: ./data)
 ```

@@ -1,5 +1,5 @@
 import LibroFmClient, { CredentialsError } from "@/LibroFmClient";
-import { parallelDownloads, pollIntervalMs } from "@/lib/Config";
+import { downloadFormat, parallelDownloads, pollIntervalMs } from "@/lib/Config";
 import { mapWithLimit } from "@/lib/Concurrency";
 import logger, { exitAfterLogs } from "@/lib/Logger";
 
@@ -39,6 +39,7 @@ async function main() {
 	// Read before logging in, so a bad setting fails right away.
 	const pollInterval = pollIntervalMs();
 	const downloadsAtOnce = parallelDownloads();
+	const format = downloadFormat();
 	const client = new LibroFmClient();
 	try {
 		await client.init();
@@ -76,7 +77,7 @@ async function main() {
 		const results = await mapWithLimit(newBooks, downloadsAtOnce, async (book) => {
 			logger.info(`Downloading: ${book.title}`, { fn });
 			try {
-				const filepath = await client.downloadBook(book);
+				const filepath = await client.downloadBook(book, false, false, format);
 				logger.info(`Downloaded ${book.title} to ${filepath}`, { fn });
 				return true;
 			} catch (error) {
@@ -118,7 +119,7 @@ async function main() {
 	};
 
 	logger.info(
-		`Checking for new books every ${pollInterval / 60_000} minutes, downloading up to ${downloadsAtOnce} at a time.`,
+		`Checking for new books every ${pollInterval / 60_000} minutes, downloading up to ${downloadsAtOnce} at a time as ${format}.`,
 		{ fn }
 	);
 	void runService();

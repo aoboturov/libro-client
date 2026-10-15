@@ -2,7 +2,7 @@ import DownloadCLient from "@/lib/DownloadClient";
 import InputHandler from "@/lib/InputHandler";
 import APIHandler from "@/APIHandler";
 import logger, { LogMethod } from "@/lib/Logger";
-import Config from "@/lib/Config";
+import Config, { downloadFormat } from "@/lib/Config";
 import State from "@/lib/State";
 import { DOWNLOAD_DIR } from "@/lib/Directories";
 import { safePathSegment } from "@/lib/Security";
@@ -135,13 +135,15 @@ export default class LibroFmClient {
 	/**
 	 * Downloads one book into the download directory and records it in the
 	 * state. Returns the book's folder, or "" when an already downloaded book
-	 * was left alone.
+	 * was left alone. As `m4b`, a title Libro.fm has no m4b of is downloaded
+	 * as MP3 tracks; `keepZip` only applies to those.
 	 */
 	@LogMethod({ scope, message: "Downloading book..." })
 	async downloadBook(
 		book: Audiobook,
 		overwrite: boolean = false,
-		keepZip: boolean = false
+		keepZip: boolean = false,
+		format: BookFormat = downloadFormat()
 	): Promise<string> {
 		const { authToken } = this.config;
 		if (!authToken) throw new Error("Not logged in");
@@ -181,22 +183,48 @@ export default class LibroFmClient {
 				.map((part) => safePathSegment(String(part)))
 				.join("/");
 
-			const [path, zipped_files] = await DownloadCLient.downloadFiles(
-				filename,
-				metadata.parts.map((p) => p.url),
-				authToken,
-				keepZip,
-				this.config.downloadDir
-			);
+			// The manifest is fetched for an m4b too: its track list is what the
+			// listening history measures positions against.
+			const m4bUrl =
+				format === "m4b"
+					? await APIHandler.fetchPackagedM4bUrl(authToken, book.isbn)
+					: undefined;
+			if (format === "m4b" && !m4bUrl) {
+				logger.info(
+					`Libro.fm has no m4b of ${book.title}; downloading its MP3 tracks.`,
+					{ fn: "LibroFmClient.downloadBook" }
+				);
+			}
+
+			let path: string;
+			let zipped_files: string[] | false = false;
+			if (m4bUrl) {
+				path = await DownloadCLient.downloadM4b(
+					filename,
+					m4bUrl,
+					authToken,
+					this.config.downloadDir
+				);
+			} else {
+				[path, zipped_files] = await DownloadCLient.downloadFiles(
+					filename,
+					metadata.parts.map((p) => p.url),
+					authToken,
+					keepZip,
+					this.config.downloadDir
+				);
+			}
+			const downloaded: BookFormat = m4bUrl ? "m4b" : "mp3";
 
 			// Neither metadata.json nor state.json keeps the signed part URLs.
 			const stored = DownloadCLient.storedMetadata(metadata);
-			await DownloadCLient.saveMetadata(book, stored, path);
+			await DownloadCLient.saveMetadata(book, stored, path, downloaded);
 
 			this.state.addBook({
 				book,
 				path,
 				meta: stored,
+				format: downloaded,
 				...(zipped_files && { zippedPaths: zipped_files }),
 			});
 

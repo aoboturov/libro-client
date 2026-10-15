@@ -4,7 +4,9 @@ import os from "os";
 import path from "path";
 
 import Config, {
+	DEFAULT_FORMAT,
 	DEFAULT_PARALLEL_DOWNLOADS,
+	downloadFormat,
 	DEFAULT_POLL_MINUTES,
 	parallelDownloads,
 	pollIntervalMs,
@@ -299,6 +301,30 @@ describe("Config", () => {
 				expect(() => parallelDownloads(bad)).toThrow(
 					"LIBROFM_PARALLEL_DOWNLOADS"
 				);
+			}
+		});
+	});
+
+	describe("downloadFormat", () => {
+		test("defaults to mp3 when LIBROFM_M4B is unset or empty", () => {
+			expect(DEFAULT_FORMAT).toBe("mp3");
+			expect(downloadFormat(undefined)).toBe("mp3");
+			expect(downloadFormat("")).toBe("mp3");
+			expect(downloadFormat("  ")).toBe("mp3");
+		});
+
+		test("LIBROFM_M4B=true means m4b, false means mp3, in any common spelling", () => {
+			for (const on of ["true", "TRUE", " True ", "1", "yes", "on"]) {
+				expect(downloadFormat(on)).toBe("m4b");
+			}
+			for (const off of ["false", "False", "0", "no", "off"]) {
+				expect(downloadFormat(off)).toBe("mp3");
+			}
+		});
+
+		test("rejects anything that is not a yes or a no", () => {
+			for (const bad of ["m4b", "mp3", "2", "enabled", "y"]) {
+				expect(() => downloadFormat(bad)).toThrow("LIBROFM_M4B must be true or false");
 			}
 		});
 	});
