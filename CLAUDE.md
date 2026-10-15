@@ -21,7 +21,7 @@ cli.ts              — CLI entry point (yargs commands: list, get, check, histo
 service.ts          — Long-running service (checks for new books every LIBROFM_POLL_MINUTES, default 15)
 src/
   LibroFmClient.ts  — Main client: login, getLibrary, downloadBook, getNewBooks, getHistory
-  APIHandler.ts     — HTTP layer: login, library, download-manifest endpoints
+  APIHandler.ts     — HTTP layer: login, library, download-manifest, packaged_m4b endpoints
   lib/
     Config.ts       — Credentials config (JSON file in data/config/, overridden by env vars)
     Directories.ts  — Path constants (data/, downloads/, logs/, cache/, config/). LIBROFM_DATA_DIR
@@ -30,7 +30,8 @@ src/
                       chmod is allowed); the download dir is created by the first download
     DownloadClient.ts — File download + zip extraction: parts are streamed to disk (never
                       whole in memory) in <download dir>/.libro-partial, unzipped there
-                      with yauzl one entry at a time, and moved into place with renames
+                      with yauzl one entry at a time, and moved into place with renames.
+                      downloadM4b() stages a packaged m4b the same way (inStaging())
     InputHandler.ts — Interactive prompts (@inquirer/* for credentials, selection)
     Logger.ts       — Winston logger + @LogMethod decorator (redacts credentials). Log files are
                       kept across runs and rotated (3 × 10 MB per level); exitAfterLogs().
@@ -59,7 +60,10 @@ src/
    `APIHandler.requestTimeoutMs`; a download part is aborted after `DownloadClient.stallTimeoutMs`
    without data
 3. CLI commands call `client.getLibrary()` -> `APIHandler.fetchLibrary()` -> paginated API
-4. `client.downloadBook()` -> `APIHandler.fetchDownloadMetadata()` -> `DownloadClient.downloadFiles()`
+4. `client.downloadBook()` -> `APIHandler.fetchDownloadMetadata()` -> `DownloadClient.downloadFiles()`.
+   With format `m4b` (`LIBROFM_FORMAT`, `get --format`), `APIHandler.fetchPackagedM4bUrl()` ->
+   `DownloadClient.downloadM4b()` instead; a title without an m4b falls back to the MP3 tracks.
+   The manifest is fetched either way: its track list is what the history measures against
 5. `State` tracks downloaded books in `data/config/state.json` (mode `0600`) as a map of ISBN →
    `StateData`. Its `meta`, like the `metadata.json` saved next to each book, is a
    `StoredDownloadMetadata`: the manifest without its signed part URLs
@@ -92,9 +96,14 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
   the signature of the gate; it is not a stale password.
 - **`User-Agent` must match a real Android app version** (`okhttp/X.Y.Z`). The app also
   sends `X-LibroFm-Device` and `X-LibroFm-OsVer`; we mirror them.
-- **`download-manifest`** takes `isbn` and `client_version` (= app version). The app adds
-  `format=m4b` for a single packaged file; omitting it returns the multi-part ZIP
-  manifest `DownloadClient` expects.
+- **`download-manifest`** takes `isbn` and `client_version` (= app version). The app also
+  sends a `format` (value unverified); omitting it returns the multi-part ZIP manifest
+  `DownloadClient` expects.
+- **`GET audiobooks/{isbn}/packaged_m4b`** returns `{ m4b_url }`: a signed, expiring URL of
+  one m4b file for the whole book (APK `fetchAudiobookRemoteSource`). Not every title has
+  one; burntcookie90's downloader treats any non-2xx as "no m4b" and falls back to MP3. We
+  do that only for 4xx other than 401/403/429 (`fetchPackagedM4bUrl` returns undefined), so
+  an outage or a rejected token is retried rather than turning an m4b into MP3s for good.
 - **v12 shape changes**: manifest tracks report `length_msec` (was `length_sec`);
   `audiobook_info.pdf_extras` is a list; `trackCount` and `audio_language_display`
   replace `track_count` and `audio_language`; `user_metadata` bookmarks and tags are
@@ -117,6 +126,7 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
 | `LIBROFM_POLL_MINUTES` | No | Minutes between the background service's library checks (default 15; fractions allowed) |
 | `LIBROFM_PARALLEL_DOWNLOADS` | No | Books downloaded at the same time, by the service and by `get` with several ISBNs (default 4) |
+| `LIBROFM_FORMAT` | No | `mp3` (tracks, default) or `m4b` (Libro.fm's packaged file, MP3 where there is none); `get --format` overrides it |
 | `LIBROFM_DOWNLOAD_DIR` | No | Where books are saved (default `downloads/`, or the folder chosen at the first interactive run) |
 | `LIBROFM_DATA_DIR` | No | Where config, state, logs and cache live (default `data/`) |
 

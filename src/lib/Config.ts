@@ -63,6 +63,27 @@ export function parallelDownloads(
 	return count;
 }
 
+export const DEFAULT_FORMAT: BookFormat = "mp3";
+const FORMATS: readonly BookFormat[] = ["mp3", "m4b"];
+
+/**
+ * The format books are downloaded in: the LIBROFM_FORMAT env var (`mp3` or
+ * `m4b`), or mp3 if unset. A title Libro.fm has no m4b of is downloaded as
+ * MP3 tracks either way.
+ */
+export function downloadFormat(
+	value: string | undefined = process.env.LIBROFM_FORMAT
+): BookFormat {
+	if (value === undefined || value.trim() === "") return DEFAULT_FORMAT;
+	const format = FORMATS.find((f) => f === value.trim().toLowerCase());
+	if (!format) {
+		throw new Error(
+			`LIBROFM_FORMAT must be one of ${FORMATS.join(", ")}, got "${value}"`
+		);
+	}
+	return format;
+}
+
 /**
  * A directory as the user typed it (`~/Books`, `../books`) made absolute, so
  * it means the same folder whatever the working directory is later.

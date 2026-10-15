@@ -2,10 +2,15 @@ type AudiobookMap = {
 	[isbn: string]: Audiobook;
 };
 
+/** MP3 tracks unpacked from the manifest's zips, or Libro.fm's single packaged m4b. */
+type BookFormat = "mp3" | "m4b";
+
 type StateData = {
 	book: Audiobook;
 	meta: StoredDownloadMetadata;
 	path: string;
+	/** What was downloaded. Absent for books downloaded before m4b support: MP3. */
+	format?: BookFormat;
 	zippedPaths?: string[];
 };
 

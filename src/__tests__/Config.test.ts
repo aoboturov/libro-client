@@ -4,7 +4,9 @@ import os from "os";
 import path from "path";
 
 import Config, {
+	DEFAULT_FORMAT,
 	DEFAULT_PARALLEL_DOWNLOADS,
+	downloadFormat,
 	DEFAULT_POLL_MINUTES,
 	parallelDownloads,
 	pollIntervalMs,
@@ -299,6 +301,27 @@ describe("Config", () => {
 				expect(() => parallelDownloads(bad)).toThrow(
 					"LIBROFM_PARALLEL_DOWNLOADS"
 				);
+			}
+		});
+	});
+
+	describe("downloadFormat", () => {
+		test("defaults to mp3 when unset or empty", () => {
+			expect(DEFAULT_FORMAT).toBe("mp3");
+			expect(downloadFormat(undefined)).toBe("mp3");
+			expect(downloadFormat("")).toBe("mp3");
+			expect(downloadFormat("  ")).toBe("mp3");
+		});
+
+		test("reads mp3 or m4b, in any case", () => {
+			expect(downloadFormat("m4b")).toBe("m4b");
+			expect(downloadFormat(" M4B ")).toBe("m4b");
+			expect(downloadFormat("MP3")).toBe("mp3");
+		});
+
+		test("rejects any other format", () => {
+			for (const bad of ["aac", "m4a", "zip", "m4b,mp3"]) {
+				expect(() => downloadFormat(bad)).toThrow("LIBROFM_FORMAT");
 			}
 		});
 	});

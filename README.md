@@ -54,11 +54,19 @@ Replace `[...isbns]` with the ISBN of the audiobook you want to download. You ca
 
 If you don't specify an ISBN, the tool will prompt you to select an audiobook from your library.
 
+Books come as MP3 tracks, one file per chapter. To get a single `.m4b` file per book instead (one file with chapter markers, the usual format for audiobook players and Audiobookshelf), add `--format m4b` or set `LIBROFM_FORMAT=m4b`:
+
+```bash
+libro get --format m4b 9780593135204
+```
+
+The m4b is the one Libro.fm packages itself, saved as `<title>.m4b` in the book's folder; nothing is converted on your machine. Libro.fm doesn't offer an m4b of every title: those books are downloaded as MP3 tracks, and the log says so. `--keep-zip` only applies to MP3 downloads. Books you already have stay as they are; downloading one again in the other format (`--overwrite`) adds the new files next to the old ones, so delete the book's folder first if you only want the new format.
+
 With several ISBNs, up to 4 books are downloaded at a time (`LIBROFM_PARALLEL_DOWNLOADS`). Books you already have are asked about first, one at a time, unless `--overwrite` is given. One failed download doesn't stop the others; the command exits with status 1 if any book could not be downloaded.
 
-A book only shows up in your download folder once it is complete. Its zip parts are streamed to a hidden `.libro-partial` folder inside the download folder, unpacked there, and then moved into place, so a failed or interrupted download never leaves a partial book behind. If the tool is killed mid-download, the next attempt at that book clears what was left; you can also delete `.libro-partial` yourself while nothing is downloading.
+A book only shows up in your download folder once it is complete. Its m4b, or its zip parts, are streamed to a hidden `.libro-partial` folder inside the download folder, unpacked there, and then moved into place, so a failed or interrupted download never leaves a partial book behind. If the tool is killed mid-download, the next attempt at that book clears what was left; you can also delete `.libro-partial` yourself while nothing is downloading.
 
-Downloads go straight to disk and are never held in memory whole, so memory use stays at a few tens of MB however large the book is. While a book downloads, the download folder needs free space for about twice its size (the zip parts plus the unpacked files).
+Downloads go straight to disk and are never held in memory whole, so memory use stays at a few tens of MB however large the book is. While an MP3 book downloads, the download folder needs free space for about twice its size (the zip parts plus the unpacked files); an m4b needs only its own size.
 
 ### Check for new audiobooks
 
@@ -98,7 +106,7 @@ Libro.fm's API has no endpoint that returns individual listening sessions (the a
 
 ## Background service
 
-The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library. It downloads up to 4 new books at a time (`LIBROFM_PARALLEL_DOWNLOADS`), so the first run on a large library takes a while; checks that come due meanwhile are skipped.
+The tool can also be run as a background service. This is useful if you want to automatically download new audiobooks as they become available in your library. It downloads up to 4 new books at a time (`LIBROFM_PARALLEL_DOWNLOADS`), as MP3 tracks or, with `LIBROFM_FORMAT=m4b`, as one m4b each, so the first run on a large library takes a while; checks that come due meanwhile are skipped.
 
 To run the service, you can use Docker or another process manager.
 
@@ -145,6 +153,7 @@ On TrueNAS (24.10 or later), run the service as a custom app from the published 
          LIBROFM_DATA_DIR: /data
          LIBROFM_DOWNLOAD_DIR: /audiobooks
          LIBROFM_POLL_MINUTES: "60"
+         LIBROFM_FORMAT: m4b
        volumes:
          - /mnt/tank/apps/libro:/data
          - /mnt/tank/media/audiobooks:/audiobooks
@@ -166,6 +175,7 @@ LIBROFM_USERNAME=<your_username>    # Libro.fm account email
 LIBROFM_PASSWORD=<your_password>    # Libro.fm account password
 LIBROFM_POLL_MINUTES=15             # background service: minutes between library checks (default: 15)
 LIBROFM_PARALLEL_DOWNLOADS=4        # books downloaded at the same time, by the service and by `get` (default: 4)
+LIBROFM_FORMAT=mp3                  # mp3 (one file per chapter) or m4b (one file per book, where Libro.fm has one) (default: mp3)
 LIBROFM_DOWNLOAD_DIR=<path>         # where books go (default: ./downloads, or the folder chosen at the first interactive run)
 LIBROFM_DATA_DIR=<path>             # where settings, the session token and logs live (default: ./data)
 ```

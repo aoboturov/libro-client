@@ -466,6 +466,89 @@ describe("LibroFmClient", () => {
 				expect(state.added[0]?.meta.parts).toEqual([{ size_bytes: 10 }]);
 			});
 
+			describe("as m4b", () => {
+				const m4bUrl = "https://cdn.example/book.m4b?Signature=s3cret";
+
+				function downloads() {
+					spyOn(APIHandler, "fetchDownloadMetadata").mockResolvedValue(manifest);
+					spyOn(DownloadClient, "saveMetadata").mockResolvedValue();
+					return {
+						m4b: spyOn(DownloadClient, "downloadM4b").mockResolvedValue(
+							"/books/Some Author/Book One"
+						),
+						mp3: spyOn(DownloadClient, "downloadFiles").mockResolvedValue([
+							"/books/Some Author/Book One",
+							false,
+						]),
+					};
+				}
+
+				const client = (state: State) =>
+					new LibroFmClient(
+						fakeConfig({ authToken: "token", downloadDir: "/books" }),
+						state
+					);
+
+				test("downloads Libro.fm's packaged m4b and records the format", async () => {
+					spyOn(APIHandler, "fetchPackagedM4bUrl").mockResolvedValue(m4bUrl);
+					const { m4b, mp3 } = downloads();
+					const state = fakeState();
+
+					await client(state).downloadBook(book, false, true, "m4b");
+
+					expect(m4b).toHaveBeenCalledWith(
+						"Some Author/Book One",
+						m4bUrl,
+						"token",
+						"/books"
+					);
+					expect(mp3).not.toHaveBeenCalled();
+					expect(state.added[0]?.format).toBe("m4b");
+					// No zips to keep, and the signed URL is not stored.
+					expect(state.added[0]?.zippedPaths).toBeUndefined();
+					expect(JSON.stringify(state.added)).not.toContain("s3cret");
+					// The track list is still kept, for the listening history.
+					expect(state.added[0]?.meta.tracks).toEqual(manifest.tracks);
+				});
+
+				test("a title without an m4b is downloaded as MP3 tracks", async () => {
+					spyOn(APIHandler, "fetchPackagedM4bUrl").mockResolvedValue(undefined);
+					const { m4b, mp3 } = downloads();
+					const state = fakeState();
+
+					await client(state).downloadBook(book, false, false, "m4b");
+
+					expect(m4b).not.toHaveBeenCalled();
+					expect(mp3).toHaveBeenCalled();
+					expect(state.added[0]?.format).toBe("mp3");
+				});
+
+				test("as mp3, no m4b is asked for", async () => {
+					const packaged = spyOn(APIHandler, "fetchPackagedM4bUrl");
+					const { mp3 } = downloads();
+					const state = fakeState();
+
+					await client(state).downloadBook(book, false, false, "mp3");
+
+					expect(packaged).not.toHaveBeenCalled();
+					expect(mp3).toHaveBeenCalled();
+					expect(state.added[0]?.format).toBe("mp3");
+				});
+
+				test("a failure to look up the m4b fails the book, to be retried", async () => {
+					spyOn(APIHandler, "fetchPackagedM4bUrl").mockRejectedValue(
+						new ApiError(503, "Service Unavailable")
+					);
+					const { m4b, mp3 } = downloads();
+
+					await expect(
+						client(fakeState()).downloadBook(book, false, false, "m4b")
+					).rejects.toThrow("HTTP 503");
+					expect(m4b).not.toHaveBeenCalled();
+					expect(mp3).not.toHaveBeenCalled();
+				});
+			});
+
 			test("a failure names the book and keeps the cause", async () => {
 				spyOn(APIHandler, "fetchDownloadMetadata").mockRejectedValue(
 					new ApiError(500, "Internal Server Error")
