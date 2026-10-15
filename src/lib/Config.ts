@@ -64,24 +64,21 @@ export function parallelDownloads(
 }
 
 export const DEFAULT_FORMAT: BookFormat = "mp3";
-const FORMATS: readonly BookFormat[] = ["mp3", "m4b"];
 
 /**
- * The format books are downloaded in: the LIBROFM_FORMAT env var (`mp3` or
- * `m4b`), or mp3 if unset. A title Libro.fm has no m4b of is downloaded as
- * MP3 tracks either way.
+ * The format books are downloaded in: m4b when the LIBROFM_M4B env var is
+ * true (also 1, yes, on), mp3 when it is false or unset. The Docker image
+ * sets it to true. A title Libro.fm has no m4b of is downloaded as MP3
+ * tracks either way.
  */
 export function downloadFormat(
-	value: string | undefined = process.env.LIBROFM_FORMAT
+	value: string | undefined = process.env.LIBROFM_M4B
 ): BookFormat {
 	if (value === undefined || value.trim() === "") return DEFAULT_FORMAT;
-	const format = FORMATS.find((f) => f === value.trim().toLowerCase());
-	if (!format) {
-		throw new Error(
-			`LIBROFM_FORMAT must be one of ${FORMATS.join(", ")}, got "${value}"`
-		);
-	}
-	return format;
+	const flag = value.trim().toLowerCase();
+	if (["true", "1", "yes", "on"].includes(flag)) return "m4b";
+	if (["false", "0", "no", "off"].includes(flag)) return "mp3";
+	throw new Error(`LIBROFM_M4B must be true or false, got "${value}"`);
 }
 
 /**

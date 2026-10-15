@@ -61,7 +61,7 @@ src/
    without data
 3. CLI commands call `client.getLibrary()` -> `APIHandler.fetchLibrary()` -> paginated API
 4. `client.downloadBook()` -> `APIHandler.fetchDownloadMetadata()` -> `DownloadClient.downloadFiles()`.
-   With format `m4b` (`LIBROFM_FORMAT`, `get --format`), `APIHandler.fetchPackagedM4bUrl()` ->
+   With format `m4b` (`LIBROFM_M4B=true`, `get --m4b`), `APIHandler.fetchPackagedM4bUrl()` ->
    `DownloadClient.downloadM4b()` instead; a title without an m4b falls back to the MP3 tracks.
    The manifest is fetched either way: its track list is what the history measures against
 5. `State` tracks downloaded books in `data/config/state.json` (mode `0600`) as a map of ISBN →
@@ -126,7 +126,7 @@ is a second, hand-maintained reference (`LIBRO_FM_HEADERS` in its Dockerfile).
 | `LIBROFM_PASSWORD` | No | Libro.fm account password (fallback to interactive prompt) |
 | `LIBROFM_POLL_MINUTES` | No | Minutes between the background service's library checks (default 15; fractions allowed) |
 | `LIBROFM_PARALLEL_DOWNLOADS` | No | Books downloaded at the same time, by the service and by `get` with several ISBNs (default 4) |
-| `LIBROFM_FORMAT` | No | `mp3` (tracks, default) or `m4b` (Libro.fm's packaged file, MP3 where there is none); `get --format` overrides it |
+| `LIBROFM_M4B` | No | `true`: Libro.fm's packaged m4b per book (MP3 where there is none); `false`: MP3 tracks. Default `false`, `true` in the Docker image; `get --m4b` / `--no-m4b` override it |
 | `LIBROFM_DOWNLOAD_DIR` | No | Where books are saved (default `downloads/`, or the folder chosen at the first interactive run) |
 | `LIBROFM_DATA_DIR` | No | Where config, state, logs and cache live (default `data/`) |
 

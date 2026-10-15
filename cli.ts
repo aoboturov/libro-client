@@ -69,10 +69,10 @@ const parser = yargs(hideBin(process.argv))
 						type: "boolean",
 						default: false,
 					},
-					format: {
+					m4b: {
 						describe:
-							"mp3 tracks, or a single m4b where Libro.fm has one (default: LIBROFM_FORMAT, else mp3)",
-						choices: ["mp3", "m4b"] as const,
+							"Download a single m4b where Libro.fm has one, instead of MP3 tracks; --no-m4b for MP3 (default: LIBROFM_M4B)",
+						type: "boolean",
 					},
 					ignoreLocal: {
 						describe: "Ignore local state and download all books",
@@ -81,7 +81,9 @@ const parser = yargs(hideBin(process.argv))
 					},
 				}),
 		async (argv) => {
-			const format = argv.format ?? downloadFormat();
+			// --m4b / --no-m4b, else LIBROFM_M4B.
+			const format: BookFormat =
+				argv.m4b === undefined ? downloadFormat() : argv.m4b ? "m4b" : "mp3";
 			const library = await client.getLibrary();
 			const requested = (argv.isbns ?? []).map(String);
 			const missing = requested.filter((isbn) => !library[isbn]);
