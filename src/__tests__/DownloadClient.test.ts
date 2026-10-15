@@ -76,6 +76,21 @@ describe("DownloadClient", () => {
 			);
 		});
 
+		test("cleans up file names an SMB share can't show", async () => {
+			const zip = await zipFile({
+				"Can Europe Survive? - 01.mp3": "1",
+				"Part: One/Why?.mp3": "2",
+			});
+			const out = path.join(tmpDir, "out");
+
+			await DownloadClient.unzip(zip, out);
+
+			expect(files(out)).toEqual([
+				"Can Europe Survive - 01.mp3",
+				path.join("Part - One", "Why.mp3"),
+			]);
+		});
+
 		test("skips directory entries", async () => {
 			const zip = new JSZip();
 			zip.folder("empty");
