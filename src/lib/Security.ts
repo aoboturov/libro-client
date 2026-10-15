@@ -101,11 +101,21 @@ export function isWithin(parent: string, child: string): boolean {
 
 /**
  * Make an API-supplied name (author, series, title) safe to use as a single
- * path segment: no separators, control characters, or `.`/`..`.
+ * path segment: no separators, control characters, or `.`/`..`. Characters
+ * Windows forbids (`: * ? " < > |`) and trailing dots or spaces are dropped
+ * too: an SMB share (a NAS) shows such a name as a mangled 8.3 name like
+ * `C6UOFL~2`. "Title: Subtitle" becomes "Title - Subtitle".
  */
 export function safePathSegment(name: string): string {
-	const cleaned = name.replace(/[/\\\x00-\x1f]/g, "-").trim();
-	return cleaned === "" || /^\.+$/.test(cleaned) ? "_" : cleaned;
+	const cleaned = name
+		.replace(/[/\\\x00-\x1f]/g, "-")
+		.replace(/\s*:\s*/g, " - ")
+		.replace(/"/g, "'")
+		.replace(/[*?<>|]/g, "")
+		.replace(/\s+/g, " ")
+		.replace(/[. ]+$/, "")
+		.trim();
+	return cleaned === "" ? "_" : cleaned;
 }
 
 /** Hidden temp file next to `file`, for writing it and renaming it over. */

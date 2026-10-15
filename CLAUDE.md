@@ -147,7 +147,8 @@ start.
   `@LogMethod({ scope, secretArgs: [0] })`. `Config` registers the values it holds.
 - The bearer token is only sent to `https://libro.fm` and its subdomains (`isLibroFmUrl`);
   CDN part URLs are fetched without it.
-- Folder names built from API metadata go through `safePathSegment`, and writes are checked
+- Folder names built from API metadata go through `safePathSegment` (which also drops the
+  characters Windows/SMB forbid, so a NAS share shows the real name), and writes are checked
   with `isWithin` (download dir, cache dir, zip entries).
 - Nothing on disk outside `data/config` holds a download credential: `DownloadClient.storedMetadata`
   strips the signed part URLs from what `saveMetadata` and `State.addBook` keep.

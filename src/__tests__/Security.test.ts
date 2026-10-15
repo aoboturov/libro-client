@@ -155,6 +155,18 @@ describe("Security", () => {
 			expect(safePathSegment(".")).toBe("_");
 			expect(safePathSegment("   ")).toBe("_");
 		});
+
+		test("drops characters an SMB share can't show", () => {
+			expect(safePathSegment("Can Europe Survive?")).toBe("Can Europe Survive");
+			expect(safePathSegment("Dune: Part One")).toBe("Dune - Part One");
+			expect(safePathSegment('The "Best" <Book> | *1*')).toBe("The 'Best' Book 1");
+		});
+
+		test("drops trailing dots and spaces", () => {
+			expect(safePathSegment("Jr.")).toBe("Jr");
+			expect(safePathSegment("Wait... ")).toBe("Wait");
+			expect(safePathSegment("?")).toBe("_");
+		});
 	});
 
 	describe("writePrivateFile", () => {

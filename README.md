@@ -139,7 +139,7 @@ The image runs as root unless told otherwise. It also runs as any other user (`-
 
 On TrueNAS (24.10 or later), run the service as a custom app from the published image.
 
-1. Create a dataset for the app data, for example `tank/apps/libro`, with the **Apps** preset. It holds the session token, so don't share it over SMB or NFS. Pick or create the dataset the books go to as well, for example `tank/media/audiobooks`; it can be an SMB share.
+1. Create a dataset for the app data, for example `tank/apps/libro`, with the **Apps** preset. It holds the session token, so don't share it over SMB or NFS. Pick or create the dataset the books go to as well, for example `tank/media/audiobooks`; it can be an SMB share. Folder names leave out the characters SMB can't show (`: * ? " < > |`, and trailing dots), so `Can Europe Survive?` is saved as `Can Europe Survive` and `Title: Subtitle` as `Title - Subtitle`. A book downloaded by v0.1.31 or earlier may show up over SMB as a short name like `C6UOFL~2`; rename its folder to fix it.
 2. The app runs as the `apps` user (UID 568). In each dataset's permissions, give `apps` **Modify** access. Owning the datasets is not needed.
 3. Go to **Apps → Discover Apps**, open the ⋮ menu, choose **Install via YAML**, name the app `libro` and paste:
 
