@@ -12,6 +12,7 @@ import { CACHE_DIR, DOWNLOAD_DIR } from "./Directories";
 import {
 	isLibroFmUrl,
 	isWithin,
+	safePathSegment,
 	tempPathFor,
 	writeFileAtomic,
 } from "./Security";
@@ -278,7 +279,12 @@ export default class DownloadCLient {
 				// Directory entries: their files create the folders they need.
 				if (entry.fileName.endsWith("/")) continue;
 
-				const filePath = path.join(outputPath, entry.fileName);
+				// Track names come from the zip; clean each segment like the
+				// book's folder so an SMB share shows the real name.
+				const filePath = path.join(
+					outputPath,
+					...entry.fileName.split("/").map(safePathSegment)
+				);
 				// Zip-slip guard: never write outside the extraction dir.
 				if (!isWithin(outputPath, filePath)) {
 					logger.warn(`Skipping unsafe zip entry: ${entry.fileName}`, {
